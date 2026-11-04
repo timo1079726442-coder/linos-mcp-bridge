@@ -161,10 +161,10 @@ describe("createLocalApprovalHandler", () => {
   });
 
   it("Legacy Profile 一律拒绝", async () => {
-    await writeProfile({ profileType: "company" });
+    await writeProfile({ profileType: "remote" });
     const { window } = fakeWindow();
     const handler = createLocalApprovalHandler({ stateRoot, getMainWindow: () => window, showDialog: vi.fn() });
-    await expect(handler(request())).rejects.toThrow(/COMPANY_PROFILE_PROTECTED/);
+    await expect(handler(request())).rejects.toThrow(/PROTECTED_PROFILE/);
   });
 
   it("没有主窗口时拒绝", async () => {

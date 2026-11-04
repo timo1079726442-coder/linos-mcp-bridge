@@ -158,7 +158,7 @@ export function ServicesPage(): JSX.Element {
 
       <div className="v2-card v2-note">
         <strong>端口说明</strong>
-        <p className="muted">默认 48767；创建时可改，不能占用 48765/48766。新增服务会启动独立 Supervisor 和 Runtime，不是切换。</p>
+        <p className="muted">默认 48766；创建时可改，不能占用 48765/48766。新增服务会启动独立 Supervisor 和 Runtime，不是切换。</p>
       </div>
     </div>
   );

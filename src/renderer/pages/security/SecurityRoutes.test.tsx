@@ -43,7 +43,7 @@ function aclSnapshot(): FolderAclSnapshot {
   return {
     profileId: "profile-home",
     profileName: "Home",
-    profileType: "home",
+    profileType: "local",
     workspaceId: "workspace-one",
     observedAt: new Date().toISOString(),
     staleAfterMs: 60_000,
@@ -58,7 +58,7 @@ function approvalsSnapshot(records: ApprovalQueueSnapshot["records"] = []): Appr
   return {
     profileId: "profile-home",
     profileName: "Home",
-    profileType: "home",
+    profileType: "local",
     workspaceId: "workspace-one",
     observedAt: new Date().toISOString(),
     staleAfterMs: 60_000,

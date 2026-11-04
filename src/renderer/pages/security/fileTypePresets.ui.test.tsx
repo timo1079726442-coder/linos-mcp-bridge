@@ -5,7 +5,7 @@ import { FolderPermissionsPage } from "./FolderPermissionsPage.js";
 import type { FolderAccessSnapshot } from "../../domain/workspaceSecurity.js";
 
 const base: FolderAccessSnapshot = {
-  profileId: "home", profileName: "Home", profileType: "home",
+  profileId: "local", profileName: "Home", profileType: "local",
   workspaceId: "ws-a", observedAt: new Date().toISOString(), staleAfterMs: 60_000,
   revision: 0, entries: [], mutationAvailability: "AVAILABLE", mutationBlockReason: null,
 };
@@ -27,8 +27,8 @@ describe("Existing FolderPermissionsPage reuse, file type preset UI", () => {
   });
   it("stays disabled when existing Legacy profile protects ACL mutations", () => {
     const html = renderToStaticMarkup(<FolderPermissionsPage snapshot={{
-      ...base, profileType:"company", mutationAvailability:"PROFILE_PROTECTED",
-      mutationBlockReason:"COMPANY_PROFILE_PROTECTED",
+      ...base, profileType:"remote", mutationAvailability:"PROFILE_PROTECTED",
+      mutationBlockReason:"PROTECTED_PROFILE",
     }} actions={actions} />);
     expect(html).toContain("Legacy Profile 已保护");
     expect(html).toContain("文件类型快捷选择");

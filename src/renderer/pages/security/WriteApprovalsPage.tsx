@@ -201,7 +201,7 @@ export function WriteApprovalsPage({ snapshot = null, loadState, errorMessage, a
   }
 
   const stale = isSnapshotStale(snapshot.observedAt, snapshot.staleAfterMs);
-  const profileReadOnly = snapshot.profileType === "company";
+  const profileReadOnly = snapshot.profileType === "remote";
   const needsAttention = snapshot.records.filter((record) => record.decision === "PENDING" || (record.decision === "APPROVED" && record.execution !== "SUCCEEDED"));
   const history = snapshot.records.filter((record) => !needsAttention.includes(record));
   return (

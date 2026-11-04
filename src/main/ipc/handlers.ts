@@ -448,7 +448,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     "service:pairing:create",
     async (_event, capability: IpcCapability, params: { port?: number } = {}) => {
       requireCap(capability, "service:pairing:create");
-      const port = typeof params.port === "number" ? params.port : 48767;
+      const port = typeof params.port === "number" ? params.port : 48766;
       const res = await fetch(`http://127.0.0.1:${port}/oauth/pairing`, { method: "POST" });
       if (!res.ok) throw new Error(`PAIRING_CREATE_FAILED_${res.status}`);
       return (await res.json()) as { ok: boolean; code: string; expiresAt: number };
@@ -459,7 +459,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     "service:pairing:clear",
     async (_event, capability: IpcCapability, params: { port?: number } = {}) => {
       requireCap(capability, "service:pairing:clear");
-      const port = typeof params.port === "number" ? params.port : 48767;
+      const port = typeof params.port === "number" ? params.port : 48766;
       const res = await fetch(`http://127.0.0.1:${port}/oauth/pairing`, { method: "DELETE" });
       if (!res.ok) throw new Error(`PAIRING_CLEAR_FAILED_${res.status}`);
       return (await res.json()) as { ok: boolean; cleared: boolean };
@@ -517,7 +517,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       return provisionNamedTunnel({
         hostname: params.hostname,
         tunnelName: params.tunnelName,
-        port: typeof params.port === "number" ? params.port : 48767,
+        port: typeof params.port === "number" ? params.port : 48766,
       });
     },
   );
@@ -985,7 +985,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     const hash = createHash("sha256").update(token, "utf8").digest("base64url");
     await fs.writeFile(target.file, JSON.stringify({ hash, scopes, createdAt: new Date().toISOString() }, null, 2), "utf8");
     const active = await ctx.supervisor.getActiveProfile().catch(() => null);
-    const url = active?.transport?.publicMcpUrl ?? `http://127.0.0.1:${active?.transport?.expectedLocalPort ?? 48767}/mcp`;
+    const url = active?.transport?.publicMcpUrl ?? `http://127.0.0.1:${active?.transport?.expectedLocalPort ?? 48766}/mcp`;
     return { token, url, scopes };
   });
 
@@ -1193,7 +1193,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     requireCap(capability, "settings:backup:export");
     const active = await ctx.supervisor.getActiveProfile();
     if (!active) throw new Error("ACTIVE_PROFILE_UNAVAILABLE");
-    if (active.profileType === "company") throw new Error("COMPANY_PROFILE_PROTECTED");
+    if (active.profileType === "remote") throw new Error("PROTECTED_PROFILE");
     const win = ctx.getMainWindow();
     if (!win) throw new Error("BACKUP_WINDOW_UNAVAILABLE");
     const result = await dialog.showSaveDialog(win, {
@@ -1217,7 +1217,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     requireCap(capability, "settings:backup:import");
     const active = await ctx.supervisor.getActiveProfile();
     if (!active) throw new Error("ACTIVE_PROFILE_UNAVAILABLE");
-    if (active.profileType === "company") throw new Error("COMPANY_PROFILE_PROTECTED");
+    if (active.profileType === "remote") throw new Error("PROTECTED_PROFILE");
     const win = ctx.getMainWindow();
     if (!win) throw new Error("BACKUP_WINDOW_UNAVAILABLE");
     const picked = await dialog.showOpenDialog(win, {
@@ -1566,7 +1566,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 async function requireAclConfirmationContext(ctx: IpcContext): Promise<AclConfirmationContext> {
   const active = await ctx.supervisor.getActiveProfile();
   if (!active) throw new Error("SECURITY_ACTIVE_PROFILE_UNAVAILABLE");
-  if (active.profileType === "company") throw new Error("COMPANY_PROFILE_PROTECTED");
+  if (active.profileType === "remote") throw new Error("PROTECTED_PROFILE");
   if (!active.currentWorkspace.workspaceId || !active.currentWorkspace.root) throw new Error("SECURITY_WORKSPACE_REQUIRED");
   const window = ctx.getMainWindow();
   if (!window || window.isDestroyed()) throw new Error("ACL_CONFIRMATION_WINDOW_UNAVAILABLE");
@@ -1581,7 +1581,7 @@ async function requireAclConfirmationContext(ctx: IpcContext): Promise<AclConfir
 
 async function assertSameAclConfirmationContext(ctx: IpcContext, expected: AclConfirmationContext): Promise<void> {
   const active = await ctx.supervisor.getActiveProfile();
-  if (!active || active.profileType === "company"
+  if (!active || active.profileType === "remote"
     || active.profileId !== expected.profileId
     || active.currentWorkspace.workspaceId !== expected.workspaceId
     || active.currentWorkspace.root !== expected.workspaceRoot) {
@@ -1654,7 +1654,7 @@ export async function decideApprovalWithLocalConfirmation(ctx: IpcContext, input
   if (input.decision === "APPROVE") {
     const record = await requireCurrentApproval(ctx.supervisor, input);
     const active = await ctx.supervisor.getActiveProfile();
-    if (active?.profileType === "company") throw new Error("COMPANY_PROFILE_PROTECTED");
+    if (active?.profileType === "remote") throw new Error("PROTECTED_PROFILE");
     const confirmed = await confirmLocalApproval(ctx, record);
     if (!confirmed) return record;
   }
@@ -1663,7 +1663,7 @@ export async function decideApprovalWithLocalConfirmation(ctx: IpcContext, input
 
 export async function executeApprovedWriteWithLocalConfirmation(ctx: IpcContext, input: ApprovalQueueActionRef) {
   const active = await ctx.supervisor.getActiveProfile();
-  if (active?.profileType === "company") throw new Error("COMPANY_PROFILE_PROTECTED");
+  if (active?.profileType === "remote") throw new Error("PROTECTED_PROFILE");
   const record = await requireCurrentApproval(ctx.supervisor, input);
   if (record.decision !== "APPROVED") throw new Error("APPROVAL_NOT_EXECUTABLE");
   const queue = await ctx.supervisor.listApprovals();

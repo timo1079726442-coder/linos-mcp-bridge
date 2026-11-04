@@ -41,12 +41,12 @@ export function McpServerWizard(): JSX.Element {
   }
 
   async function pickFreePort(): Promise<number> {
-    for (let candidate = 48767; candidate <= 48820; candidate += 1) {
+    for (let candidate = 48766; candidate <= 48820; candidate += 1) {
       if (!validPort(candidate)) continue;
       const result = await window.c2c.service.portAvailable(candidate);
       if (result.available) return candidate;
     }
-    throw new Error("找不到空闲端口（48767–48820），请手动填写。");
+    throw new Error("找不到空闲端口（48766–48820），请手动填写。");
   }
 
   async function waitHealthy(targetPort: number): Promise<void> {
@@ -92,7 +92,7 @@ export function McpServerWizard(): JSX.Element {
       setStep("创建本机 Profile");
       const profile = await window.c2c.profile.create({
         profileName: name.trim() || `MCP 服务 ${targetPort}`,
-        profileType: "home",
+        profileType: "local",
         initialWorkspaceRoot: info.root,
         expectedLocalPort: targetPort,
       });
@@ -114,7 +114,7 @@ export function McpServerWizard(): JSX.Element {
         setStep("创建命名隧道并绑定 DNS");
         const provisioned = await window.c2c.namedTunnel.provision({
           hostname: hostname.trim(),
-          tunnelName: `linos-${hostname.trim().split(".")[0] || "home"}`,
+          tunnelName: `linos-${hostname.trim().split(".")[0] || "local"}`,
           port: targetPort,
         });
         if (!provisioned.ok) throw new Error("隧道创建未全部成功，请查看 Cloudflare 侧配置。");

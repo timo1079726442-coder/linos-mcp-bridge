@@ -212,7 +212,7 @@ describe("ConnectionsPage tunnel self-heal button", () => {
 
   it("hides the button for company profiles", async () => {
     setC2C({
-      profile: { getActive: () => Promise.resolve(profile({ profileType: "company" })) },
+      profile: { getActive: () => Promise.resolve(profile({ profileType: "remote" })) },
       diagnostics: {
         run: () => Promise.resolve(report()),
         matchRepairOptions: () => Promise.resolve(emptyMatchResponse()),

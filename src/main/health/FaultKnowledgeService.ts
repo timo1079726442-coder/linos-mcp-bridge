@@ -391,7 +391,7 @@ export class FaultKnowledgeService {
     report: DiagnosticsReport,
     profile: ProfileConfig,
   ): { reasonCode: string | null } {
-    if (profile.profileType === "company") return { reasonCode: "COMPANY_PROFILE_REPAIR_DISABLED" };
+    if (profile.profileType === "remote") return { reasonCode: "COMPANY_PROFILE_REPAIR_DISABLED" };
     if (!profile.currentWorkspace.root || !profile.currentWorkspace.workspaceId) return { reasonCode: "WORKSPACE_REQUIRED" };
     if (fault.code === "WORKSPACE_IDENTITY_MISMATCH" || fault.code === "PROFILE_IDENTITY_MISMATCH" || fault.code === "ACTIVE_PROFILE_UNRESOLVED") {
       return { reasonCode: "IDENTITY_MISMATCH_REQUIRES_MANUAL_REVIEW" };

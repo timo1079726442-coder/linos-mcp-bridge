@@ -8,7 +8,7 @@ import { faultSignature } from "./FaultKnowledgeProjection.js";
 const PROFILE_ID = "profile-v2-test";
 const WORKSPACE_ID = "workspace-v2-test";
 
-function makeProfile(profileType: "company" | "custom" = "custom"): ProfileConfig {
+function makeProfile(profileType: "remote" | "custom" = "custom"): ProfileConfig {
   return {
     schemaVersion: "2",
     profileId: PROFILE_ID,
@@ -160,7 +160,7 @@ function matchOptionsRequest(request: RunRepairRequest): MatchRepairOptionsReque
 
 describe("FaultKnowledgeService", () => {
   it("rejects Legacy Profile repair before invoking Recovery", async () => {
-    const profile = makeProfile("company");
+    const profile = makeProfile("remote");
     const recovery = vi.fn((): Promise<RecoveryResult> | null => null);
     const { service } = createService({ profile, code: "LOCAL_RUNTIME_NOT_READY", recover: recovery });
     const request = repairRequest(profile, "LOCAL_RUNTIME_NOT_READY", "START_PROFILE_RUNTIME");

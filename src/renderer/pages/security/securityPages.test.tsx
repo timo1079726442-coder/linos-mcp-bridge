@@ -42,13 +42,13 @@ describe("workspace security projections", () => {
       check: async () => ({ allowed: false as const, profileId: "profile-home", workspaceId: "workspace-one", canonicalPath: null, operation: "read" as const, ruleId: null, reason: "NO_RULES" as const }),
     };
     const editableHtml = renderToStaticMarkup(<FolderPermissionsPage snapshot={{
-      ...base, profileType: "home", mutationAvailability: "AVAILABLE", mutationBlockReason: null,
+      ...base, profileType: "local", mutationAvailability: "AVAILABLE", mutationBlockReason: null,
     }} actions={actions} />);
     expect(editableHtml).toContain("添加授权规则");
     expect(editableHtml).toContain("默认拒绝");
 
     const protectedHtml = renderToStaticMarkup(<FolderPermissionsPage snapshot={{
-      ...base, profileType: "company", mutationAvailability: "PROFILE_PROTECTED", mutationBlockReason: "COMPANY_PROFILE_PROTECTED",
+      ...base, profileType: "remote", mutationAvailability: "PROFILE_PROTECTED", mutationBlockReason: "PROTECTED_PROFILE",
     }} actions={actions} />);
     expect(protectedHtml).toContain("Legacy Profile 已保护");
     expect(protectedHtml).toContain("添加授权规则");
@@ -59,7 +59,7 @@ describe("workspace security projections", () => {
     const snapshot: ApprovalQueueSnapshot = {
       profileId: "profile-home",
       profileName: "Home",
-      profileType: "home",
+      profileType: "local",
       workspaceId: "workspace-one",
       observedAt: "2026-10-08T10:00:00.000Z",
       staleAfterMs: 60_000,
@@ -103,7 +103,7 @@ describe("workspace security projections", () => {
     expect(html).not.toContain("本机确认并执行");
     expect(html).not.toContain("本机确认并批准");
 
-    const companyHtml = renderToStaticMarkup(<WriteApprovalsPage snapshot={{ ...snapshot, profileType: "company" }} actions={{
+    const companyHtml = renderToStaticMarkup(<WriteApprovalsPage snapshot={{ ...snapshot, profileType: "remote" }} actions={{
       decide: async () => undefined,
       execute: async () => undefined,
       revoke: async () => undefined,

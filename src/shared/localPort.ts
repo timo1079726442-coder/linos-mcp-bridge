@@ -1,5 +1,5 @@
-/** 本机 Runtime 端口策略：默认 48767，可配置；仅保留实例 48765 永久保留。 */
-export const DEFAULT_RUNTIME_PORT = 48767;
+/** 本机 Runtime 端口策略：默认 48766，可配置；仅保留实例 48765 永久保留。 */
+export const DEFAULT_RUNTIME_PORT = 48766;
 /**
  * 只保留保留端口 48765。
  * 48766 曾是 Legacy MCP 的端口；该工具已被本内核替代并停用，

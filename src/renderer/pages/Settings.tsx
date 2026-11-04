@@ -10,7 +10,7 @@ export function SettingsPage(): JSX.Element {
   const [err, setErr] = useState<string | null>(null);
   const [loginItem, setLoginItem] = useState<{ openAtLogin: boolean; openAsHidden: boolean } | null>(null);
   const [healthSec, setHealthSec] = useState("30");
-  const [portInput, setPortInput] = useState("48767");
+  const [portInput, setPortInput] = useState("48766");
   const [tokenInfo, setTokenInfo] = useState<{ configured: boolean; createdAt?: string | null } | null>(null);
   const [tokenPlain, setTokenPlain] = useState<string | null>(null);
 
@@ -258,7 +258,7 @@ export function SettingsPage(): JSX.Element {
         </p>
         <div className="kv">
           <div className="k">MCP 地址</div>
-          <div className="v"><code>{profile.transport?.publicMcpUrl ?? `http://127.0.0.1:${profile.transport?.expectedLocalPort ?? 48767}/mcp`}</code></div>
+          <div className="v"><code>{profile.transport?.publicMcpUrl ?? `http://127.0.0.1:${profile.transport?.expectedLocalPort ?? 48766}/mcp`}</code></div>
           <div className="k">令牌状态</div>
           <div className="v">{tokenInfo?.configured ? `已生成（${tokenInfo.createdAt ? new Date(tokenInfo.createdAt).toLocaleString() : "时间未知"}）` : "未生成"}</div>
         </div>
@@ -275,7 +275,7 @@ export function SettingsPage(): JSX.Element {
         </div>
         {tokenInfo?.configured && (
           <pre className="muted" style={{ fontSize: 11, marginTop: 10, whiteSpace: "pre-wrap" }}>{`# 任意 MCP 客户端（HTTP）
-url: ${profile.transport?.publicMcpUrl ?? `http://127.0.0.1:${profile.transport?.expectedLocalPort ?? 48767}/mcp`}
+url: ${profile.transport?.publicMcpUrl ?? `http://127.0.0.1:${profile.transport?.expectedLocalPort ?? 48766}/mcp`}
 header: Authorization: Bearer <上面生成的令牌>`}</pre>
         )}
       </div>

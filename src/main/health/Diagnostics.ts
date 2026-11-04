@@ -262,7 +262,7 @@ export class Diagnostics {
 function toSummary(c: ProfileConfig): {
   profileId: string;
   profileName: string;
-  profileType: "company" | "home" | "custom";
+  profileType: "remote" | "local" | "custom";
   createdAt: string;
   currentWorkspaceRoot: string | null;
   currentWorkspaceId: string | null;

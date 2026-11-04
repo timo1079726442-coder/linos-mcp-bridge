@@ -17,20 +17,20 @@ beforeEach(async () => {
 });
 
 describe("ProfileStore", () => {
-  it("creates a profile with default config (V2 isolated: 48767 + LOCAL_ONLY)", async () => {
-    const cfg = await store.create({ profileName: "COMPANY", profileType: "company" });
+  it("creates a profile with default config (V2 isolated: 48766 + LOCAL_ONLY)", async () => {
+    const cfg = await store.create({ profileName: "COMPANY", profileType: "remote" });
     expect(cfg.profileName).toBe("COMPANY");
-    expect(cfg.profileType).toBe("company");
+    expect(cfg.profileType).toBe("remote");
     expect(cfg.profileId.startsWith("mb_pf_")).toBe(true);
     expect(cfg.runtimeId.startsWith("c2c_rt_")).toBe(true);
     expect(cfg.runtime.source).toBe("PACKAGED_V2");
-    expect(cfg.transport.expectedLocalPort).toBe(48767);
+    expect(cfg.transport.expectedLocalPort).toBe(48766);
     expect(cfg.transport.provider).toBe("LOCAL_ONLY");
   });
 
   it("isolates profiles by profileId", async () => {
-    await store.create({ profileName: "A", profileType: "company" });
-    await store.create({ profileName: "B", profileType: "home" });
+    await store.create({ profileName: "A", profileType: "remote" });
+    await store.create({ profileName: "B", profileType: "local" });
     const list = await store.list();
     expect(list).toHaveLength(2);
     expect(list.map((s) => s.profileName).sort()).toEqual(["A", "B"]);
@@ -113,9 +113,9 @@ describe("ProfileStore", () => {
   });
 
   // P0-A — new profile defaults are 100% isolated (CP0 Founder OPTION_A_PLUS)
-  it("P0-A TEST_NEW_PROFILE_DEFAULT_ISOLATED: new profile uses 48767 + LOCAL_ONLY", async () => {
+  it("P0-A TEST_NEW_PROFILE_DEFAULT_ISOLATED: new profile uses 48766 + LOCAL_ONLY", async () => {
     const cfg = await store.create({ profileName: "ISOLATED", profileType: "custom" });
-    expect(cfg.transport.expectedLocalPort).toBe(48767);
+    expect(cfg.transport.expectedLocalPort).toBe(48766);
     expect(cfg.transport.provider).toBe("LOCAL_ONLY");
     expect(cfg.transport.hostname).toBeNull();
     expect(cfg.transport.tunnelName).toBeNull();
@@ -151,7 +151,7 @@ describe("ProfileStore", () => {
       ...cfg,
       transport: { ...cfg.transport, publicMcpUrl: "https://mcp-legacy.example.com/mcp" },
     };
-    await expect(store.writeConfig(tampered as ProfileConfig)).rejects.toThrow(/PRODUCTION/i);
+    await expect(store.writeConfig(tampered as ProfileConfig)).rejects.toThrow(/RESERVED|PRODUCTION/i);
   });
 
   it("imports a tunnel credential into the current Profile transport directory without reusing the source path", async () => {
@@ -195,7 +195,7 @@ describe("ProfileStore", () => {
 
     expect(prepared.result.changed).toBe(true);
     expect(prepared.result.restartRequired).toBe(true);
-    expect(prepared.candidate.transport.expectedLocalPort).toBe(48767);
+    expect(prepared.candidate.transport.expectedLocalPort).toBe(48766);
     expect(prepared.candidate.transport.publicMcpUrl).toBe("https://c2c-v2-preview.example.test/mcp");
     expect(prepared.result.settings.credentialConfigured).toBe(true);
   });
@@ -210,11 +210,11 @@ describe("ProfileStore", () => {
     await expect(store.prepareServiceConnectionUpdate({
       expectedProfileId: cfg.profileId,
       provider: "CLOUDFLARE_NAMED",
-      hostname: V2IsolationConfig.PROTECTED_PRODUCTION_HOSTNAME,
+      hostname: V2IsolationConfig.RESERVED_HOSTNAME,
       tunnelName: "safe-preview-name",
       tunnelId: "preview-tunnel-id",
       credentialPath,
-    })).rejects.toThrow(/PRODUCTION/i);
+    })).rejects.toThrow(/RESERVED|PRODUCTION/i);
   });
 
   it("service config adopts a credential written outside the Profile by copying it inside", async () => {

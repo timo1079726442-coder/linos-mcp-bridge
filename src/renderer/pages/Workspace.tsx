@@ -296,7 +296,7 @@ export function WorkspacePage(): JSX.Element {
                 将此目录绑定到当前 Profile
               </button>
               {!active && <span className="muted">需先创建或激活 Profile。</span>}
-              {active?.profileType === "company" && <span className="muted">切换仅影响所选的当前 Profile，并由受控 Workspace 变更事务处理。</span>}
+              {active?.profileType === "remote" && <span className="muted">切换仅影响所选的当前 Profile，并由受控 Workspace 变更事务处理。</span>}
             </div>
           </div>
         )}
@@ -347,8 +347,8 @@ export function WorkspacePage(): JSX.Element {
               />
               <select className="input" aria-label="Profile 类型" value={newProfileType} onChange={(event) => setNewProfileType(event.target.value as ProfileType)}>
                 <option value="custom">CUSTOM</option>
-                <option value="home">HOME</option>
-                <option value="company">COMPANY</option>
+                <option value="local">HOME</option>
+                <option value="remote">COMPANY</option>
               </select>
               <button className="btn" type="button" onClick={() => void handleCreateProfile()} disabled={busy || !newProfileName.trim()}>
                 创建并激活

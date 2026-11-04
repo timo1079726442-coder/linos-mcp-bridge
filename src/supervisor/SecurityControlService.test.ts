@@ -9,7 +9,7 @@ import { SecurityControlService } from "./SecurityControlService.js";
 
 const roots: string[] = [];
 
-function profile(workspaceRoot: string, profileType: ProfileConfig["profileType"] = "home", workspaceId = "workspace-a"): ProfileConfig {
+function profile(workspaceRoot: string, profileType: ProfileConfig["profileType"] = "local", workspaceId = "workspace-a"): ProfileConfig {
   return {
     schemaVersion: "2",
     profileId: "profile-a",
@@ -39,7 +39,7 @@ function profile(workspaceRoot: string, profileType: ProfileConfig["profileType"
   };
 }
 
-async function makeContext(profileType: ProfileConfig["profileType"] = "home") {
+async function makeContext(profileType: ProfileConfig["profileType"] = "local") {
   const root = await mkdtemp(path.join(tmpdir(), "c2c-security-control-"));
   roots.push(root);
   const stateRoot = path.join(root, "state");
@@ -65,7 +65,7 @@ describe("SecurityControlService", () => {
     const snapshot = await context.service.getFolderAcl();
     expect(snapshot).toMatchObject({
       profileId: "profile-a",
-      profileType: "home",
+      profileType: "local",
       workspaceId: "workspace-a",
       mutationAvailability: "AVAILABLE",
       entries: [],
@@ -103,11 +103,11 @@ describe("SecurityControlService", () => {
   });
 
   it("keeps Legacy Profile read-only and rejects all ACL and approval mutations", async () => {
-    const context = await makeContext("company");
+    const context = await makeContext("remote");
     await expect(context.service.getFolderAcl()).resolves.toMatchObject({
-      profileType: "company",
+      profileType: "remote",
       mutationAvailability: "PROFILE_PROTECTED",
-      mutationBlockReason: "COMPANY_PROFILE_PROTECTED",
+      mutationBlockReason: "PROTECTED_PROFILE",
     });
     await expect(context.service.addFolderAclRule({
       path: context.workspaceRoot,
@@ -117,13 +117,13 @@ describe("SecurityControlService", () => {
       confirmedProfileId: "profile-a",
       confirmedWorkspaceId: "workspace-a",
       confirmedWorkspaceRoot: context.workspaceRoot,
-    })).rejects.toThrow("COMPANY_PROFILE_PROTECTED");
+    })).rejects.toThrow("PROTECTED_PROFILE");
     await expect(context.service.removeFolderAclRule({
       ruleId: "missing", expectedRevision: 1, nativeConfirmation: "LOCAL_CONFIRMED",
       confirmedProfileId: "profile-a", confirmedWorkspaceId: "workspace-a",
       confirmedWorkspaceRoot: context.workspaceRoot,
-    })).rejects.toThrow("COMPANY_PROFILE_PROTECTED");
-    await expect(context.service.executeApprovedWrite({ requestId: "missing", expectedRevision: 1 })).rejects.toThrow("COMPANY_PROFILE_PROTECTED");
+    })).rejects.toThrow("PROTECTED_PROFILE");
+    await expect(context.service.executeApprovedWrite({ requestId: "missing", expectedRevision: 1 })).rejects.toThrow("PROTECTED_PROFILE");
     expect(context.auditEvents).toEqual([]);
   });
 
@@ -140,7 +140,7 @@ describe("SecurityControlService", () => {
     });
     const nextRoot = path.join(context.root, "workspace-b");
     await mkdir(nextRoot);
-    context.active.value = profile(nextRoot, "home", "workspace-b");
+    context.active.value = profile(nextRoot, "local", "workspace-b");
 
     await expect(context.service.getFolderAcl()).rejects.toThrow("ACL_SCOPE_MISMATCH");
   });

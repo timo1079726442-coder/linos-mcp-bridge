@@ -145,7 +145,7 @@ export async function discoverServices(stateRoot: string): Promise<DiscoveryResu
 
   add(await ourProfilePort(stateRoot), "profile");
   add(await peerPort(), "peer-config");
-  for (const p of [48765, 48766, 48767, 8765]) add(p, "known");
+  for (const p of [48765, 48766, 48766, 8765]) add(p, "known");
 
   const services: DiscoveredService[] = [];
   for (const [port, source] of candidates) {

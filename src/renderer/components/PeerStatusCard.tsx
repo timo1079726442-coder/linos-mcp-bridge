@@ -205,7 +205,7 @@ export function PeerStatusCard({
         </button>
       </div>
 
-      {port === 48767 && (
+      {port === 48766 && (
         <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
           <button
             className="btn"

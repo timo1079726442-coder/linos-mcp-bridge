@@ -25,19 +25,19 @@ describe("parseFirstBootPort", () => {
 
 describe("firstBootPort", () => {
   it("已有配置时 CLI 永远不得覆盖", () => {
-    expect(firstBootPort(48800, "LOCAL_ONLY", 48767, 48767)).toBe(48767);
-    expect(firstBootPort(48800, "CLOUDFLARE_NAMED", 49999, 48767)).toBe(49999);
+    expect(firstBootPort(48800, "LOCAL_ONLY", 48766, 48766)).toBe(48766);
+    expect(firstBootPort(48800, "CLOUDFLARE_NAMED", 49999, 48766)).toBe(49999);
   });
 
   it("从未配置时用 CLI 端口，否则用默认值", () => {
-    expect(firstBootPort(48800, null, 48767, 48767)).toBe(48800);
-    expect(firstBootPort(null, null, 48767, 48767)).toBe(48767);
-    expect(firstBootPort(48765, null, 48767, 48767)).toBe(48767);
+    expect(firstBootPort(48800, null, 48766, 48766)).toBe(48800);
+    expect(firstBootPort(null, null, 48766, 48766)).toBe(48766);
+    expect(firstBootPort(48765, null, 48766, 48766)).toBe(48766);
   });
 
   it("isValidRuntimePort 永不放行内部/对端端口", () => {
     expect(isValidRuntimePort(48765)).toBe(false);
     expect(isValidRuntimePort(48766)).toBe(true);
-    expect(isValidRuntimePort(48767)).toBe(true);
+    expect(isValidRuntimePort(48766)).toBe(true);
   });
 });

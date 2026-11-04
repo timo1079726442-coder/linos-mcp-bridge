@@ -263,7 +263,7 @@ export function ConnectionsPage({ view }: { view: ConnectionView }): JSX.Element
   const viewInfo: Record<ConnectionView, { title: string; desc: string }> = {
     chatgpt: { title: "ChatGPT 连接", desc: "把本机 Runtime 授权给 ChatGPT 网页版：先建连接申请，再用配对码/授权页完成绑定。" },
     clients: { title: "其他 AI 客户端", desc: "给 Cursor、Claude 等客户端使用的 MCP 地址与授权信息。" },
-    mcp: { title: "MCP 服务", desc: "本机三个服务的端口、健康检查与工具清单；48765 / 48766 / 48767 各自独立。" },
+    mcp: { title: "MCP 服务", desc: "本机三个服务的端口、健康检查与工具清单；48765 / 48766 / 48766 各自独立。" },
     tunnel: { title: "Cloudflare 隧道", desc: "把本机 MCP 暴露成公网 HTTPS；ChatGPT 网页版必须走这一步。" },
   };
 

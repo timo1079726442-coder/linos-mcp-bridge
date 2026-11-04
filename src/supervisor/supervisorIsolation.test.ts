@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { V2_ISOLATION } from "./supervisorMain.js";
 
 describe("V2 Isolation Defaults (OPTION_A_PLUS)", () => {
-  it("V2_LOCAL_PORT is 48767 (NOT 48765)", () => {
-    expect(V2_ISOLATION.V2_LOCAL_PORT).toBe(48767);
+  it("V2_LOCAL_PORT is 48766 (NOT 48765)", () => {
+    expect(V2_ISOLATION.V2_LOCAL_PORT).toBe(48766);
     expect(V2_ISOLATION.V2_LOCAL_PORT).not.toBe(48765);
   });
 

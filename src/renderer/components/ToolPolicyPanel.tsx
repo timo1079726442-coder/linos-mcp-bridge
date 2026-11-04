@@ -48,7 +48,7 @@ export function ToolPolicyPanel({ port, profile }: { port?: number; profile?: { 
     setLoading(true);
     setErr(null);
     try {
-      // 端口必须来自当前 Profile，不能写死（内部 48766 / 远端 48767）。
+      // 端口必须来自当前 Profile，不能写死（内部 48766 / 远端 48766）。
       // 传入 profile 时不再重复读取，避免重复 IPC 与竞态。
       const activeProfile = profile !== undefined ? profile : await window.c2c.profile.getActive().catch(() => null);
       const activePort = port ?? activeProfile?.transport?.expectedLocalPort ?? 0;

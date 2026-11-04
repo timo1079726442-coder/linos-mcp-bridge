@@ -29,7 +29,7 @@ export interface FolderAclSnapshot {
   staleAfterMs: number;
   revision: number;
   mutationAvailability: "AVAILABLE" | "PROFILE_PROTECTED";
-  mutationBlockReason: "COMPANY_PROFILE_PROTECTED" | null;
+  mutationBlockReason: "PROTECTED_PROFILE" | null;
   entries: FolderAccessEntry[];
 }
 

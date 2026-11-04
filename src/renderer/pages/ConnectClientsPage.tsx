@@ -10,7 +10,7 @@ export function ConnectClientsPage(): JSX.Element {
     void window.c2c.profile.getActive().then(setProfile).catch(() => undefined);
   }, []);
 
-  const port = profile?.transport.expectedLocalPort ?? 48767;
+  const port = profile?.transport.expectedLocalPort ?? 48766;
   const url = profile?.transport.publicMcpUrl ?? `http://127.0.0.1:${port}/mcp`;
   const snippet = JSON.stringify({
     mcpServers: {

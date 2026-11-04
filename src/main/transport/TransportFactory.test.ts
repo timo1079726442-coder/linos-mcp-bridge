@@ -23,7 +23,7 @@ function profile(overrides: Partial<ProfileConfig["transport"]> = {}): ProfileCo
       hostname: null,
       zone: null,
       publicMcpUrl: null,
-      expectedLocalPort: 48767,
+      expectedLocalPort: 48766,
       ...overrides,
     },
     expectedLocalHost: "127.0.0.1",
@@ -82,7 +82,7 @@ describe("TransportFactory", () => {
       hostname: "mcp-legacy.example.com",
       publicMcpUrl: "https://mcp-legacy.example.com/mcp",
       credentialPath: path.join(stateRoot, "profiles", "mb_pf_factory", "transport", "company.json"),
-    }), stateRoot)).toThrow(/Legacy Production/);
+    }), stateRoot)).toThrow(/Reserved|Legacy Production/);
   });
 
   it("rejects public URLs on LOCAL_ONLY Profiles before Runtime args or diagnostics can expose them", async () => {

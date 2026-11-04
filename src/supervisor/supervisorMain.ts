@@ -111,7 +111,7 @@ function createBridgeDiagnosticSink(filePath: string): RuntimeBridgeDiagnosticSi
 
 export const V2_ISOLATION = {
   V2_DEFAULT_ISOLATION: true,
-  V2_LOCAL_PORT: 48767,
+  V2_LOCAL_PORT: 48766,
   V2_DEFAULT_TRANSPORT: "LOCAL_ONLY",
   V2_PUBLIC_HOSTNAME_DEFAULT: "DISABLED",
   COMPANY_PRODUCTION_PROTECTED: true,
@@ -562,7 +562,7 @@ async function main(): Promise<void> {
         case "profile.create": {
           const params = (req.params ?? {}) as {
             profileName?: string;
-            profileType?: "company" | "home" | "custom";
+            profileType?: "remote" | "local" | "custom";
             initialWorkspaceRoot?: string | null;
             expectedLocalPort?: number;
           };

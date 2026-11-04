@@ -160,7 +160,7 @@ export function createLocalApprovalHandler(options: LocalApprovalBridgeOptions):
   return async (params: Record<string, unknown>): Promise<unknown> => {
     const request = parseApprovalRequest(params);
     const context = await readActiveProfileContext(options.stateRoot);
-    if (context.profileType === "company") throw new Error("COMPANY_PROFILE_PROTECTED");
+    if (context.profileType === "remote") throw new Error("PROTECTED_PROFILE");
     if (context.workspaceId !== request.workspaceId
       || normalizePath(context.workspaceRoot) !== normalizePath(request.workspaceRoot)) {
       throw new Error("APPROVAL_CONTEXT_MISMATCH");

@@ -17,8 +17,8 @@ function tailName(root: string | null | undefined): string {
 }
 
 function readableProfileType(value: ProfileConfig["profileType"] | undefined): string {
-  if (value === "company") return "Legacy";
-  if (value === "home") return "Home";
+  if (value === "remote") return "Legacy";
+  if (value === "local") return "Home";
   if (value === "custom") return "Custom";
   return "未知";
 }

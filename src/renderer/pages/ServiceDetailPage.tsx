@@ -66,7 +66,7 @@ export function ServiceDetailPage(): JSX.Element {
         <div className="v2-page-head">
           <div>
             <div className="page-title">内部 Codex 桥（48765）</div>
-            <p className="muted v2-subtitle">这是内部固定使用的桥，不影响 C2C Runtime（48767）。</p>
+            <p className="muted v2-subtitle">这是内部固定使用的桥，不影响 C2C Runtime（48766）。</p>
           </div>
           <Link className="btn secondary" to="/services">← 返回服务列表</Link>
         </div>

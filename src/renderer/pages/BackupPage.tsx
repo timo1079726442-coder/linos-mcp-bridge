@@ -92,10 +92,10 @@ export function BackupPage(): JSX.Element {
               <strong>密钥与授权由 DPAPI 单独管理，不会写入备份文件</strong>。
             </p>
             <div className="toolbar" style={{ marginTop: 12 }}>
-              <button className="btn" type="button" onClick={() => void handleExport()} disabled={busy || profile.profileType === "company"} data-testid="btn-backup-export">
+              <button className="btn" type="button" onClick={() => void handleExport()} disabled={busy || profile.profileType === "remote"} data-testid="btn-backup-export">
                 {busy ? "处理中…" : "导出配置备份"}
               </button>
-              {profile.profileType === "company" && <span className="muted">内部 Profile 受保护，不提供配置备份导出。</span>}
+              {profile.profileType === "remote" && <span className="muted">内部 Profile 受保护，不提供配置备份导出。</span>}
             </div>
           </section>
 
@@ -107,10 +107,10 @@ export function BackupPage(): JSX.Element {
               恢复需本机确认。
             </p>
             <div className="toolbar" style={{ marginTop: 12 }}>
-              <button className="btn" type="button" onClick={() => void handleImport()} disabled={busy || profile.profileType === "company"} data-testid="btn-backup-import">
+              <button className="btn" type="button" onClick={() => void handleImport()} disabled={busy || profile.profileType === "remote"} data-testid="btn-backup-import">
                 {busy ? "处理中…" : "从备份恢复"}
               </button>
-              {profile.profileType === "company" && <span className="muted">内部 Profile 受保护，不提供配置恢复。</span>}
+              {profile.profileType === "remote" && <span className="muted">内部 Profile 受保护，不提供配置恢复。</span>}
             </div>
           </section>
         </>

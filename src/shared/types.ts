@@ -11,7 +11,7 @@ export type WorkspaceId = string;
 
 // ===== Profile =====
 
-export type ProfileType = "company" | "home" | "custom";
+export type ProfileType = "local" | "remote" | "custom";
 
 export interface ProfileSummary {
   profileId: ProfileId;

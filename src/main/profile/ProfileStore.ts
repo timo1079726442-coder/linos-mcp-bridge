@@ -29,16 +29,16 @@ import { DeviceIdentity } from "./DeviceIdentity.js";
  */
 export const V2IsolationConfig = {
   V2_DEFAULT_ISOLATION: true,
-  V2_LOCAL_PORT: 48767,
+  V2_LOCAL_PORT: 48766,
   V2_DEFAULT_TRANSPORT: "LOCAL_ONLY",
   V2_PUBLIC_HOSTNAME_DEFAULT: "DISABLED",
   COMPANY_PRODUCTION_PROTECTED: true,
   AUTO_PRODUCTION_TAKEOVER: false,
   LEGACY_MIGRATION_MODE_DEFAULT: false,
   RUNTIME_PROCESS_EXEC_PATH_DEFAULT_REMOVED: true,
-  PROTECTED_PRODUCTION_PORT: 48765,
-  PROTECTED_PRODUCTION_HOSTNAME: "mcp-legacy.example.com",
-  PROTECTED_PRODUCTION_TUNNEL: "mcpbridge-tunnel",
+  RESERVED_PORT: 48765,
+  RESERVED_HOSTNAME: "mcp-legacy.example.com",
+  RESERVED_TUNNEL_NAME: "mcpbridge-tunnel",
 } as const;
 
 /**
@@ -401,28 +401,28 @@ export function enforceIsolatedDefaults(config: ProfileConfig): void {
   const publicUrl = config.transport.publicMcpUrl?.toLowerCase() ?? "";
   const hostname = config.transport.hostname?.toLowerCase() ?? "";
   const tunnelName = config.transport.tunnelName?.toLowerCase() ?? "";
-  if (publicUrl.includes(V2IsolationConfig.PROTECTED_PRODUCTION_HOSTNAME)) {
+  if (publicUrl.includes(V2IsolationConfig.RESERVED_HOSTNAME)) {
     throw new Error(
       `V2_ISOLATION: profile ${config.profileId} refuses to default-bind ` +
-        `Legacy Production hostname ${V2IsolationConfig.PROTECTED_PRODUCTION_HOSTNAME}`,
+        `Reserved hostname ${V2IsolationConfig.RESERVED_HOSTNAME}`,
     );
   }
   if (provider === "LOCAL_ONLY" && config.transport.publicMcpUrl?.trim()) {
     throw new Error("V2_LOCAL_ONLY_PUBLIC_URL_FORBIDDEN");
   }
-  if (hostname.includes(V2IsolationConfig.PROTECTED_PRODUCTION_HOSTNAME)) {
+  if (hostname.includes(V2IsolationConfig.RESERVED_HOSTNAME)) {
     throw new Error(
       `V2_ISOLATION: profile ${config.profileId} refuses to use ` +
-        `Legacy Production hostname ${V2IsolationConfig.PROTECTED_PRODUCTION_HOSTNAME}`,
+        `Reserved hostname ${V2IsolationConfig.RESERVED_HOSTNAME}`,
     );
   }
-  if (tunnelName.includes(V2IsolationConfig.PROTECTED_PRODUCTION_TUNNEL)) {
+  if (tunnelName.includes(V2IsolationConfig.RESERVED_TUNNEL_NAME)) {
     throw new Error(
       `V2_ISOLATION: profile ${config.profileId} refuses to default-use ` +
-        `Legacy Production tunnel ${V2IsolationConfig.PROTECTED_PRODUCTION_TUNNEL}`,
+        `Reserved tunnel ${V2IsolationConfig.RESERVED_TUNNEL_NAME}`,
     );
   }
-  if (config.transport.credentialPath?.toLowerCase().includes(V2IsolationConfig.PROTECTED_PRODUCTION_TUNNEL)) {
+  if (config.transport.credentialPath?.toLowerCase().includes(V2IsolationConfig.RESERVED_TUNNEL_NAME)) {
     throw new Error(
       `V2_ISOLATION: profile ${config.profileId} refuses to use Legacy Production credential identity`,
     );

@@ -22,14 +22,14 @@ export function pickSelfHealSuggestion(
   profile: ProfileConfig | null,
 ): SelfHealSuggestion | null {
   if (!profile || !report) return null;
-  if (profile.profileType === "company") return null;
+  if (profile.profileType === "remote") return null;
   if (profile.transport.provider !== "CLOUDFLARE_NAMED") return null;
   if (report.transport.processAlive === false) return "START_PROFILE_TUNNEL";
   return "RESTART_PROFILE_TUNNEL";
 }
 
 const KNOWN_REASON_MESSAGES: Readonly<Record<string, string>> = {
-  COMPANY_PROFILE_PROTECTED: "Legacy Profile 不允许自修隧道。",
+  PROTECTED_PROFILE: "Legacy Profile 不允许自修隧道。",
   COMPANY_PROFILE_REPAIR_DISABLED: "Legacy Profile 不允许自修隧道。",
   TRANSPORT_PROFILE_NOT_ALLOWED: "当前 Profile 不在自修白名单（c2c-company / mcpbridge-tunnel 受保护）。",
   TRANSPORT_PROCESS_NOT_OWNED: "控制中心未持有当前隧道进程；请勿手动结束外部 cloudflared。",

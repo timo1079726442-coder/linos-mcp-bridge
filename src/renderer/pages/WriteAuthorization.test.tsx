@@ -122,7 +122,7 @@ describe("WriteAuthorizationPage", () => {
     await flush();
 
     expect(host.textContent).toContain("仅 Codex 48765 MCP");
-    expect(host.textContent).toContain("不改变 C2C 48767 Runtime 的 Supervisor／审批策略");
+    expect(host.textContent).toContain("不改变 C2C 48766 Runtime 的 Supervisor／审批策略");
   });
 
   it("stages an exact-file grant and saves it only on Apply", async () => {

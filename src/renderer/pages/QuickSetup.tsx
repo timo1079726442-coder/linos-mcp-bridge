@@ -26,7 +26,7 @@ export function QuickSetupPage(): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [done, setDone] = useState(false);
-  const [port, setPort] = useState("48767");
+  const [port, setPort] = useState("48766");
 
   const [mode, setMode] = useState<Mode>("local");
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
@@ -99,7 +99,7 @@ export function QuickSetupPage(): JSX.Element {
       if (!current) {
         const created = await window.c2c.profile.create({
           profileName: "本机 HOME",
-          profileType: "home",
+          profileType: "local",
           initialWorkspaceRoot: info.root,
           expectedLocalPort: targetPort,
         });
@@ -141,7 +141,7 @@ export function QuickSetupPage(): JSX.Element {
         setTunnelUrl(null);
         setNotice("已切换为仅本机模式：不对外开放。");
       } else {
-        const r = await window.c2c.tunnel.start(active?.transport.expectedLocalPort ?? parseRuntimePort(port) ?? 48767);
+        const r = await window.c2c.tunnel.start(active?.transport.expectedLocalPort ?? parseRuntimePort(port) ?? 48766);
         setTunnelRunning(r.running);
         setTunnelUrl(r.url);
         setNotice(
@@ -212,7 +212,7 @@ export function QuickSetupPage(): JSX.Element {
     }
     const ok = window.confirm(
       `接下来会在你的 Cloudflare 账号里：\n\n` +
-        `1) 创建隧道 linos-c2c-${hostname.split(".")[0] || "home"}（已存在则复用）\n` +
+        `1) 创建隧道 linos-c2c-${hostname.split(".")[0] || "local"}（已存在则复用）\n` +
         `2) 把 ${hostname || "你填写的域名"} 的 DNS 指向这条隧道\n\n` +
         `这会真实修改你的 Cloudflare 账号。确定继续吗？`,
     );
@@ -225,7 +225,7 @@ export function QuickSetupPage(): JSX.Element {
     try {
       const r = await window.c2c.namedTunnel.provision({
         hostname,
-        tunnelName: `linos-c2c-${hostname.split(".")[0] || "home"}`,
+        tunnelName: `linos-c2c-${hostname.split(".")[0] || "local"}`,
         port: profile.transport.expectedLocalPort,
       });
       setProvSteps(r.steps);
@@ -266,7 +266,7 @@ export function QuickSetupPage(): JSX.Element {
     setNotice("");
     try {
       const profile = await window.c2c.profile.getActive();
-      const targetPort = profile?.transport.expectedLocalPort ?? parseRuntimePort(port) ?? 48767;
+      const targetPort = profile?.transport.expectedLocalPort ?? parseRuntimePort(port) ?? 48766;
       const r = await window.c2c.service.createPairing(targetPort);
       setCode(r.code);
       setCodeExpires(r.expiresAt);
@@ -346,7 +346,7 @@ export function QuickSetupPage(): JSX.Element {
               <span className="muted" style={{ fontSize: 12 }}>
                 {active
                   ? "端口已按首次安装时的参数固定；要换端口请用 --port 重装或到服务设置修改。"
-                  : "默认 48767（也可用 48766）；不能是保留端口 48765。"}
+                  : "默认 48766（也可用 48766）；不能是保留端口 48765。"}
               </span>
             </div>
           )}

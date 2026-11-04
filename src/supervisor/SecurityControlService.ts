@@ -88,13 +88,13 @@ export class SecurityControlService {
   async getFolderAcl(): Promise<FolderAclSnapshot> {
     const active = await this.requireActiveWorkspace();
     const snapshot = await this.acl(active).listSnapshot();
-    const protectedProfile = active.profileType === "company";
+    const protectedProfile = active.profileType === "remote";
     return {
       ...snapshot,
       profileName: active.profileName,
       profileType: active.profileType,
       mutationAvailability: protectedProfile ? "PROFILE_PROTECTED" : "AVAILABLE",
-      mutationBlockReason: protectedProfile ? "COMPANY_PROFILE_PROTECTED" : null,
+      mutationBlockReason: protectedProfile ? "PROTECTED_PROFILE" : null,
       entries: snapshot.entries.map((entry) => ({ ...entry, folderPath: redactString(entry.folderPath) })),
     };
   }
@@ -767,7 +767,7 @@ export class SecurityControlService {
 
   private async requireMutableWorkspace(): Promise<ProfileConfig> {
     const active = await this.requireActiveWorkspace();
-    if (active.profileType === "company") throw new SecurityControlError("COMPANY_PROFILE_PROTECTED");
+    if (active.profileType === "remote") throw new SecurityControlError("PROTECTED_PROFILE");
     return active;
   }
 }

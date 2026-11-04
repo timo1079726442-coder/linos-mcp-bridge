@@ -289,7 +289,7 @@ export function rebuildTrayMenu(): void {
   void (async (): Promise<void> => {
     if (!tray) return;
     const active = await supervisor?.getActiveProfile().catch(() => null) ?? null;
-    const port = active?.transport?.expectedLocalPort ?? 48767;
+    const port = active?.transport?.expectedLocalPort ?? 48766;
     const provider = (active?.transport?.provider ?? "LOCAL_ONLY").toUpperCase();
     const publicUrl = active?.transport?.publicMcpUrl ?? null;
     const providerLabel = provider === "CLOUDFLARE_NAMED" ? "固定域名" : "仅本机";

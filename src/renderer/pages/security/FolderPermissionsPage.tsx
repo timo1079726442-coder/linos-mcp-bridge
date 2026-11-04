@@ -35,7 +35,7 @@ function extensionSummary(policy: FolderAccessEntry["extensionPolicy"]): string 
 function safeErrorCode(error: unknown): string {
   const code = error instanceof Error ? error.message : "";
   const known = new Set([
-    "COMPANY_PROFILE_PROTECTED", "SECURITY_WORKSPACE_REQUIRED", "ACL_PATH_NOT_ABSOLUTE", "ACL_PATH_UNAVAILABLE",
+    "PROTECTED_PROFILE", "SECURITY_WORKSPACE_REQUIRED", "ACL_PATH_NOT_ABSOLUTE", "ACL_PATH_UNAVAILABLE",
     "ACL_RULE_PATH_NOT_DIRECTORY", "ACL_OUTSIDE_WORKSPACE", "ACL_PATH_UNRESOLVABLE", "ACL_WORKSPACE_UNAVAILABLE",
     "ACL_SCOPE_MISMATCH", "ACL_STALE_REVISION", "ACL_BAD_EXTENSION", "ACL_BAD_PERMISSION", "ACL_STORE_UNAVAILABLE",
     "ACL_CONFIRMATION_CANCELLED", "ACL_CONFIRMATION_WINDOW_UNAVAILABLE", "ACL_PROFILE_OR_WORKSPACE_CHANGED",
@@ -46,7 +46,7 @@ function safeErrorCode(error: unknown): string {
 
 function displayAclError(code: string): string {
   const messages: Record<string, string> = {
-    COMPANY_PROFILE_PROTECTED: "Legacy Profile 已锁定，不能修改本机 ACL。",
+    PROTECTED_PROFILE: "Legacy Profile 已锁定，不能修改本机 ACL。",
     SECURITY_WORKSPACE_REQUIRED: "当前 Profile 没有已验证的 Workspace。",
     ACL_PATH_NOT_ABSOLUTE: "请选择或输入完整目录路径。",
     ACL_PATH_UNAVAILABLE: "目录不存在或当前不可访问。",

@@ -23,7 +23,7 @@ export async function updateOrdinarySettings(
   if (activeProfileId !== activeProfile.profileId) throw new Error("ACTIVE_PROFILE_CHANGED");
 
   const current = await profileStore.readConfig(activeProfileId);
-  if (current.profileType === "company") throw new Error("COMPANY_PROFILE_PROTECTED");
+  if (current.profileType === "remote") throw new Error("PROTECTED_PROFILE");
 
   const patch = validateOrdinarySettingsPatch(rawPatch);
   const updated: ProfileConfig = {

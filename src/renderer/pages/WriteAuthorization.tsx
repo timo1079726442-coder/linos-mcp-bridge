@@ -150,7 +150,7 @@ export function WriteAuthorizationPage(): JSX.Element {
       {error ? <div className="error-banner" data-testid="write-auth-error">{error}</div> : null}
 
       <div className="banner info" role="note">
-        本页只影响 <strong>Codex 48765</strong> 的写入/PowerShell 策略，不改变 C2C Runtime（48767）的目录权限。
+        本页只影响 <strong>Codex 48765</strong> 的写入/PowerShell 策略，不改变 C2C Runtime（48766）的目录权限。
         C2C Runtime 的目录读写请到「文件夹权限（C2C）」。
       </div>
 
@@ -172,7 +172,7 @@ export function WriteAuthorizationPage(): JSX.Element {
           <div>
             <h3 style={{ margin: 0 }}>本地文件写入开关</h3>
             <p style={{ margin: 0, color: "var(--muted)" }}>
-              开启后，仅 Codex 48765 MCP 可在下方明确授权的目录或文件中创建、修改和覆盖文件；不会逐文件弹窗。此策略目前不改变 C2C 48767 Runtime 的 Supervisor／审批策略。
+              开启后，仅 Codex 48765 MCP 可在下方明确授权的目录或文件中创建、修改和覆盖文件；不会逐文件弹窗。此策略目前不改变 C2C 48766 Runtime 的 Supervisor／审批策略。
             </p>
           </div>
           <span className={`pill pill-${enabledPill.tone}`} data-testid="write-auth-status">{enabledPill.text}</span>

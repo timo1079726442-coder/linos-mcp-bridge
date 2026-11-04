@@ -62,12 +62,12 @@ const aclRule: FolderAccessEntry = {
   revision: 4,
 };
 
-function setup(profileType: "home" | "company" = "home", executionAvailability: "AVAILABLE" | "UNAVAILABLE" = "UNAVAILABLE") {
+function setup(profileType: "local" | "remote" = "local", executionAvailability: "AVAILABLE" | "UNAVAILABLE" = "UNAVAILABLE") {
   const getApproval = vi.fn().mockResolvedValue(record);
   const executeApprovedWrite = vi.fn().mockResolvedValue({ status: "UNAVAILABLE", code: "APPROVAL_SAFE_EXECUTION_UNAVAILABLE", record });
   const getActiveProfile = vi.fn().mockResolvedValue({
     profileId: record.profileId,
-    profileName: profileType === "company" ? "Legacy" : record.profileName,
+    profileName: profileType === "remote" ? "Legacy" : record.profileName,
     profileType,
     currentWorkspace: { root: "D:\\workspace", workspaceId: record.workspaceId },
   });
@@ -145,11 +145,11 @@ describe("security IPC confirmation boundary", () => {
     const { ctx, getActiveProfile, addFolderAclRule } = setup();
     getActiveProfile
       .mockResolvedValueOnce({
-        profileId: "profile-home", profileName: "Home", profileType: "home",
+        profileId: "profile-home", profileName: "Home", profileType: "local",
         currentWorkspace: { root: "D:\\workspace", workspaceId: "workspace-home" },
       })
       .mockResolvedValueOnce({
-        profileId: "profile-home", profileName: "Home", profileType: "home",
+        profileId: "profile-home", profileName: "Home", profileType: "local",
         currentWorkspace: { root: "D:\\workspace-two", workspaceId: "workspace-home" },
       });
     vi.mocked(dialog.showMessageBox).mockResolvedValue({ response: 0, checkboxChecked: false });
@@ -191,8 +191,8 @@ describe("security IPC confirmation boundary", () => {
     expect(removeFolderAclRule).not.toHaveBeenCalled();
 
     getActiveProfile.mockReset()
-      .mockResolvedValueOnce({ profileId: "profile-home", profileName: "Home", profileType: "home", currentWorkspace: { root: "D:\\workspace", workspaceId: "workspace-home" } })
-      .mockResolvedValueOnce({ profileId: "profile-home", profileName: "Home", profileType: "home", currentWorkspace: { root: "D:\\workspace-two", workspaceId: "workspace-two" } });
+      .mockResolvedValueOnce({ profileId: "profile-home", profileName: "Home", profileType: "local", currentWorkspace: { root: "D:\\workspace", workspaceId: "workspace-home" } })
+      .mockResolvedValueOnce({ profileId: "profile-home", profileName: "Home", profileType: "local", currentWorkspace: { root: "D:\\workspace-two", workspaceId: "workspace-two" } });
     vi.mocked(dialog.showMessageBox).mockResolvedValue({ response: 0, checkboxChecked: false });
 
     await expect(removeFolderAclRuleWithLocalConfirmation(ctx, input)).rejects.toThrow("ACL_PROFILE_OR_WORKSPACE_CHANGED");
@@ -276,13 +276,13 @@ describe("security IPC confirmation boundary", () => {
   });
 
   it("blocks Legacy approval and does not open a misleading confirmation", async () => {
-    const { ctx, supervisor } = setup("company");
+    const { ctx, supervisor } = setup("remote");
 
     await expect(decideApprovalWithLocalConfirmation(ctx, {
       requestId: record.requestId,
       expectedRevision: record.revision,
       decision: "APPROVE",
-    })).rejects.toThrow("COMPANY_PROFILE_PROTECTED");
+    })).rejects.toThrow("PROTECTED_PROFILE");
     expect(dialog.showMessageBox).not.toHaveBeenCalled();
     expect(supervisor.decideApproval).not.toHaveBeenCalled();
   });

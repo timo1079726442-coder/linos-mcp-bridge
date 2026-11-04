@@ -18,7 +18,7 @@ afterEach(async () => {
   await rm(stateRoot, { recursive: true, force: true });
 });
 
-async function createActiveProfile(profileType: "home" | "company" | "custom" = "home") {
+async function createActiveProfile(profileType: "local" | "remote" | "custom" = "local") {
   return store.create({ profileName: "Settings fixture", profileType });
 }
 
@@ -83,11 +83,11 @@ describe("ordinary settings persistence", () => {
   });
 
   it("blocks Legacy Profiles before writing", async () => {
-    const profile = await createActiveProfile("company");
+    const profile = await createActiveProfile("remote");
     const before = await store.readConfig(profile.profileId);
 
     await expect(updateOrdinarySettings(store, profile, { healthCheckIntervalSec: 120 }))
-      .rejects.toThrow("COMPANY_PROFILE_PROTECTED");
+      .rejects.toThrow("PROTECTED_PROFILE");
     expect(await store.readConfig(profile.profileId)).toEqual(before);
   });
 
