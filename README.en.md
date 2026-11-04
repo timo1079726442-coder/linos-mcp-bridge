@@ -2,7 +2,7 @@
 
 [中文说明](README.md) · **English**
 
-![CI](https://github.com/timo1079726442-coder/mcp-bridge/actions/workflows/ci.yml/badge.svg) ![License](https://img.shields.io/badge/license-MIT-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+![CI](https://github.com/timo1079726442-coder/linos-mcp-bridge/actions/workflows/ci.yml/badge.svg) ![License](https://img.shields.io/badge/license-MIT-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
 A self-hosted **MCP (Model Context Protocol) server** that turns your local machine into a safe pair of hands for AI: file read/write, command execution, Git, and long-running jobs — exposed to ChatGPT and any MCP client (Cursor, Claude Desktop, Codex, VS Code…), with a desktop control center, audit chain, and resumable hand-offs.
 

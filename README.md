@@ -2,7 +2,7 @@
 
 [English](README.en.md) · **中文**
 
-![CI](https://github.com/timo1079726442-coder/mcp-bridge/actions/workflows/ci.yml/badge.svg) ![License](https://img.shields.io/badge/license-MIT-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+![CI](https://github.com/timo1079726442-coder/linos-mcp-bridge/actions/workflows/ci.yml/badge.svg) ![License](https://img.shields.io/badge/license-MIT-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
 让你的本地机器成为 AI 可以安全使用的“双手”：一个自托管的 **MCP（Model Context Protocol）服务器**，把文件读写、命令执行、Git、后台长任务暴露给 ChatGPT 以及任意 MCP 客户端（Cursor / Claude / Codex / VS Code…），并带桌面控制中心、审计链和断点交接。
 
