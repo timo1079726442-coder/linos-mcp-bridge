@@ -1,0 +1,5 @@
+/* 面板自身用 Shadow DOM，这里只约束宿主节点，避免被页面布局影响。 */
+#linos-c2c-host {
+  position: static !important;
+  z-index: 2147483647 !important;
+}

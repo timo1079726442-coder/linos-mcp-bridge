@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "MCP Bridge Panel",
+  "version": "0.1.0",
+  "description": "在网页版 AI 里调用本机 MCP Bridge 的工具。",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "MCP Bridge Panel"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chat.deepseek.com/*",
+        "https://gemini.google.com/*",
+        "https://chat.qwen.ai/*",
+        "https://tongyi.aliyun.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "panel.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

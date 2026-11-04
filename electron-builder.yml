@@ -1,0 +1,46 @@
+# LinOS MCP: Windows portable ZIP only.
+# No NSIS, MSI, installer/uninstaller, registry modification or auto-upgrade.
+# Each device creates its own per-user state and must explicitly authorize access.
+appId: com.linos.mcp.portable
+productName: LinOS MCP
+copyright: Copyright © 2026 LinOS
+artifactName: LinOS-MCP-Portable-${version}-${arch}.${ext}
+
+directories:
+  output: release-portable
+  buildResources: assets
+
+files:
+  - package.json
+  - dist/**
+  - "!dist/**/*.test.js"
+  - "!dist/**/*.spec.js"
+  - "!dist/**/__tests__/**"
+  - runtime/package.json
+  - runtime/dist/**/*
+  - runtime/node_modules/**/*
+  - assets/**
+  - "!**/*.map"
+  - extension/**
+
+extraResources:
+  - from: scripts/dpapi-helper.ps1
+    to: scripts/dpapi-helper.ps1
+  - from: scripts/portable-mode.json
+    to: portable-mode.json
+
+# 关键：必须关闭 asar。
+# 本项目会 spawn 两个子进程 —— supervisor（dist/supervisor/supervisorMain.js）
+# 和 V2 runtime（runtime/dist/main.js）。asar 里的文件不是真实文件，
+# 子进程无法执行，会直接报 RUNTIME_NOT_FOUND / supervisor 起不来。
+# 关闭 asar 后 resources/app/ 就是普通目录，行为与本机已验证的"解包安装"完全一致。
+asar: false
+compression: maximum
+
+win:
+  target: ["zip"]
+  artifactName: LinOS-MCP-Portable-${version}-${arch}.${ext}
+
+publish: null
+extraMetadata:
+  main: dist/main/main.js

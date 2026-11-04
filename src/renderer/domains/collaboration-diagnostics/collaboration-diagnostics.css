@@ -1,0 +1,417 @@
+.c2c-domain-page {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 24px;
+}
+
+.c2c-domain-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.c2c-domain-heading > div {
+  min-width: 0;
+}
+
+.c2c-domain-heading h1 {
+  margin: 0;
+  font-size: clamp(20px, 2vw, 25px);
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+.c2c-domain-heading p {
+  max-width: 820px;
+  margin: 7px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.c2c-domain-card {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-panel);
+}
+
+.c2c-domain-card h2 {
+  margin: 0 0 14px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.c2c-domain-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.c2c-domain-fact {
+  display: flex;
+  min-width: 0;
+  min-height: 62px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+}
+
+.c2c-domain-fact > span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.c2c-domain-fact > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.c2c-evidence-badge {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.c2c-evidence-badge.success {
+  border-color: rgba(81, 214, 160, 0.32);
+  background: rgba(81, 214, 160, 0.1);
+  color: var(--green);
+}
+
+.c2c-evidence-badge.warning {
+  border-color: rgba(231, 188, 102, 0.34);
+  background: rgba(231, 188, 102, 0.1);
+  color: var(--yellow);
+}
+
+.c2c-evidence-badge.danger {
+  border-color: rgba(241, 127, 130, 0.34);
+  background: rgba(241, 127, 130, 0.1);
+  color: var(--red);
+}
+
+.c2c-evidence-badge.neutral {
+  background: rgba(120, 132, 147, 0.1);
+  color: var(--text-dim);
+}
+
+.c2c-domain-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.c2c-source-line {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.c2c-diagnostic-note,
+.c2c-muted {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.c2c-empty-state {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid rgba(231, 188, 102, 0.26);
+  border-radius: 10px;
+  background: rgba(231, 188, 102, 0.055);
+  color: var(--text-dim);
+}
+
+.c2c-empty-state.empty {
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.c2c-empty-state strong {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.c2c-empty-state p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.c2c-observation-card {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid rgba(231, 188, 102, 0.27);
+  border-radius: 10px;
+  background: rgba(231, 188, 102, 0.045);
+}
+
+.c2c-observation-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.c2c-observation-heading strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.c2c-observation-card p,
+.c2c-observation-card ul {
+  margin: 10px 0 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.c2c-observation-card ul {
+  padding-left: 18px;
+}
+
+.c2c-match-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.c2c-match-list li > span {
+  margin-right: 8px;
+  color: var(--text);
+}
+
+.c2c-match-list li > p {
+  margin: 5px 0 0;
+}
+
+.c2c-lesson-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(21, 31, 43, 0.72);
+}
+
+.c2c-lesson-card summary {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.c2c-lesson-card summary > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.c2c-lesson-card summary > span > strong {
+  margin-right: 5px;
+  color: var(--accent);
+}
+
+.c2c-lesson-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.c2c-lesson-fields p {
+  margin: 10px 0 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.c2c-lesson-fields p > strong {
+  color: var(--text);
+}
+
+.c2c-search-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.c2c-search-field input {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--bg-elev);
+  color: var(--text);
+}
+
+.c2c-inline-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.c2c-inline-stats span {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.c2c-safety-callout {
+  padding: 16px;
+  border: 1px solid rgba(241, 127, 130, 0.32);
+  border-radius: 10px;
+  background: rgba(241, 127, 130, 0.055);
+}
+
+.c2c-safety-callout strong {
+  color: var(--red);
+  font-size: 13px;
+}
+
+.c2c-safety-callout p {
+  margin: 6px 0 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.c2c-public-output {
+  margin: 10px 0 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font-family: var(--font-mono, "Consolas", "Monaco", monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+@media (max-width: 760px) {
+  .c2c-domain-heading {
+    flex-wrap: wrap;
+  }
+
+  .c2c-domain-heading > button {
+    width: 100%;
+  }
+
+  .c2c-domain-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .c2c-lesson-card summary {
+    flex-direction: column;
+  }
+}
+
+/* 对比度修正：绿色徽章在深色卡片上几乎看不清，加不透明底 + 提亮文字。 */
+.c2c-evidence-badge.success {
+  border-color: #2f9e6b;
+  background: #10362a;
+  color: #7df0b8;
+  font-weight: 600;
+}
+.c2c-evidence-badge.warning {
+  border-color: #a9791f;
+  background: #3a2b0c;
+  color: #ffd479;
+  font-weight: 600;
+}
+.c2c-evidence-badge.danger {
+  border-color: #a33a3d;
+  background: #3a1416;
+  color: #ff9ea1;
+  font-weight: 600;
+}
+.c2c-evidence-badge.neutral {
+  border-color: #4a5568;
+  background: #1f2733;
+  color: #e2e8f0;
+  font-weight: 600;
+}
+/* 故障知识库：改回浅色卡片 + 深色文字，和整页白底一致（原来深灰卡片在白底上很刺眼）。 */
+.c2c-lesson-card {
+  background: #ffffff;
+  border-color: #d6dde8;
+}
+.c2c-lesson-card summary {
+  color: #1f2937;
+}
+.c2c-lesson-card summary > span > strong {
+  color: #1d4ed8;
+}
+.c2c-lesson-fields {
+  border-top-color: #e5eaf2;
+}
+.c2c-lesson-fields p {
+  color: #475569;
+}
+.c2c-lesson-fields p > strong {
+  color: #111827;
+}
+.c2c-evidence-badge.success {
+  border-color: #86efac;
+  background: #dcfce7;
+  color: #14532d;
+  font-weight: 600;
+}
+.c2c-evidence-badge.warning {
+  border-color: #fcd34d;
+  background: #fef3c7;
+  color: #78350f;
+  font-weight: 600;
+}
+.c2c-evidence-badge.danger {
+  border-color: #fca5a5;
+  background: #fee2e2;
+  color: #7f1d1d;
+  font-weight: 600;
+}
+.c2c-evidence-badge.neutral {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+  color: #1e293b;
+  font-weight: 600;
+}

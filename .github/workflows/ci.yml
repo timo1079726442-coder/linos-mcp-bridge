@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build:runtime
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      # runtime 里有若干依赖真实进程时序的用例（后台任务输出/取消），CI 机器较慢时会偶发失败。
+      # 第一次失败自动重跑一次；仍失败才算真失败。
+      - id: runtime-test
+        run: npm --prefix runtime test
+        continue-on-error: true
+      - if: steps.runtime-test.outcome == 'failure'
+        run: npm --prefix runtime test

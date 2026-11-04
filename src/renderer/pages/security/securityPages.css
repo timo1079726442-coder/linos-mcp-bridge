@@ -1,0 +1,249 @@
+.security-feature-page {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.security-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.security-card {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-panel);
+}
+
+.security-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.security-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.security-facts > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.security-facts strong,
+.security-definition-list dd {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.security-fact-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.security-definition-list {
+  display: grid;
+  gap: 11px;
+  margin: 14px 0 0;
+}
+
+.security-definition-list > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.security-definition-list dt {
+  color: var(--text-dim);
+}
+
+.security-definition-list dd {
+  margin: 0;
+  text-align: right;
+}
+
+.security-scope-list {
+  display: grid;
+  gap: 0;
+  margin-top: 8px;
+}
+
+.security-scope-list > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.security-scope-list > div:last-child {
+  border-bottom: 0;
+}
+
+.security-scope-list strong {
+  color: var(--text);
+}
+
+.security-scope-list span,
+.security-muted {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.security-evidence-message {
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.security-window-list,
+.security-policy-list {
+  display: grid;
+  gap: 9px;
+  margin: 12px 0 0;
+  padding-left: 20px;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+.security-window-list {
+  padding: 0;
+  list-style: none;
+}
+
+.security-window-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.security-window-list li > span:first-child {
+  overflow-wrap: anywhere;
+}
+
+.security-window-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.security-tag-warn {
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+
+.security-preview-frame,
+.security-preview-empty {
+  display: grid;
+  gap: 8px;
+  place-items: center;
+  min-height: 150px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  text-align: center;
+  overflow: hidden;
+}
+
+.security-preview-frame img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+}
+
+.security-preview-frame small {
+  color: var(--text-muted);
+}
+
+.security-disabled-action {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.security-disabled-action span {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.security-status-panel {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--status-unknown);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+
+.security-status-panel[data-state="enabled"] {
+  border-left-color: var(--yellow);
+}
+
+.security-status-panel[data-state="disabled"] {
+  border-left-color: var(--green);
+}
+
+.security-status-panel strong {
+  overflow-wrap: anywhere;
+}
+
+.security-error {
+  margin-bottom: 0;
+  color: var(--red);
+}
+
+@media (max-width: 900px) {
+  .security-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 620px) {
+  .security-card {
+    padding: 14px;
+  }
+
+  .security-card-heading {
+    flex-direction: column;
+  }
+
+  .security-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .security-definition-list > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .security-definition-list dd {
+    text-align: left;
+  }
+}
