@@ -3,7 +3,7 @@ import type { ProfileConfig } from "../../shared/types.js";
 
 /**
  * 其他 AI 客户端接入：一个长期令牌 + 现成的配置片段。
- * 非 OAuth 客户端（Cursor / Claude / Agent / VS Code）用这个接。
+ * 非 OAuth 客户端（Cursor / Claude / Codex / VS Code）用这个接。
  */
 export function SettingsClientsPage(): JSX.Element {
   const [profile, setProfile] = useState<ProfileConfig | null>(null);
@@ -66,7 +66,7 @@ export function SettingsClientsPage(): JSX.Element {
       code: JSON.stringify({ mcpServers: { "linos-c2c": { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2),
     },
     {
-      name: "Agent CLI",
+      name: "Codex CLI",
       file: "~/.codex/config.toml",
       code: `[mcp_servers.linos-c2c]\nurl = "${url}"\nhttp_headers = { Authorization = "Bearer ${token}" }`,
     },
@@ -82,7 +82,7 @@ export function SettingsClientsPage(): JSX.Element {
       <div className="c2c-domain-heading">
         <div>
           <h1>其他 AI 接入</h1>
-          <p>ChatGPT 用 OAuth 连接器；Cursor / Claude / Agent / VS Code 这类客户端用这里的长期令牌。</p>
+          <p>ChatGPT 用 OAuth 连接器；Cursor / Claude / Codex / VS Code 这类客户端用这里的长期令牌。</p>
         </div>
       </div>
 

@@ -4,14 +4,14 @@ import * as path from "node:path";
 /**
  * RuntimeResolver — resolve the V2 Runtime binary path per `runtime.source`.
  *
- * Per ADR-0002 §7:
+ * Per FOUNDER OPTION_A_PLUS §7:
  *   - Production MUST use PACKAGED_V2 (NOT process.execPath)
  *   - EXTERNAL_DEV / LEGACY_MIGRATION allowed only with explicit opt-in
  *   - Path is required to exist and be executable; missing → throw
  *
  * Resolution strategy:
  *   1. PACKAGED_V2  → app.getAppPath()/resources/runtime/dist/main.js
- *                     (or MCP_BRIDGE_RUNTIME_BUNDLE_DIR env override)
+ *                     (or C2C_RUNTIME_BUNDLE_DIR env override)
  *   2. EXTERNAL_DEV  → $C2C_RUNTIME_EXTERNAL_DIR/main.js (user-provided)
  *   3. LEGACY_MIGRATION → $C2C_LEGACY_RUNTIME_DIR/c2c.js (legacy dev only)
  *   4. Default (Development build) → repo-local runtime/dist/main.js
@@ -39,9 +39,9 @@ export class RuntimeResolver {
 
     switch (source) {
       case "PACKAGED_V2": {
-        const envEntry = process.env.MCP_BRIDGE_RUNTIME_ENTRY?.trim();
-        const bundleDir = process.env.MCP_BRIDGE_RUNTIME_BUNDLE_DIR?.trim();
-        // 宿主环境变量污染防护：任何从父进程继承的 MCP_BRIDGE_RUNTIME_ENTRY 都可能指向
+        const envEntry = process.env.C2C_RUNTIME_ENTRY?.trim();
+        const bundleDir = process.env.C2C_RUNTIME_BUNDLE_DIR?.trim();
+        // 宿主环境变量污染防护：任何从父进程继承的 C2C_RUNTIME_ENTRY 都可能指向
         // 另一份旧安装（实测过：Harness 的 shell 里带着 D:\LinOS\... 的旧路径，
         // 导致新包拉起 10/17 的旧 runtime，接口缺失且难排查）。
         // 打包运行（有 appRoot）时：优先用包内 runtime；环境变量只有在指向包内目录，
@@ -81,8 +81,8 @@ export class RuntimeResolver {
         throw new Error(
           `RUNTIME_NOT_FOUND: PACKAGED_V2 runtime not found. Tried: ${candidates.join(", ")}. ` +
             (envEntry && !envEntryUsable
-              ? `已忽略继承的 MCP_BRIDGE_RUNTIME_ENTRY=${envEntry}（不在安装目录内，可能是宿主环境泄漏；如确需覆盖请设 C2C_ALLOW_RUNTIME_OVERRIDE=1）。`
-              : "Set MCP_BRIDGE_RUNTIME_BUNDLE_DIR or MCP_BRIDGE_RUNTIME_ENTRY or run from packaged app."),
+              ? `已忽略继承的 C2C_RUNTIME_ENTRY=${envEntry}（不在安装目录内，可能是宿主环境泄漏；如确需覆盖请设 C2C_ALLOW_RUNTIME_OVERRIDE=1）。`
+              : "Set C2C_RUNTIME_BUNDLE_DIR or C2C_RUNTIME_ENTRY or run from packaged app."),
         );
       }
       case "EXTERNAL_DEV": {
@@ -102,7 +102,7 @@ export class RuntimeResolver {
       case "LEGACY_MIGRATION": {
         if (process.env.LEGACY_MIGRATION_MODE !== "true") {
           throw new Error(
-            "LEGACY_MIGRATION_MODE not enabled. Per ADR-0002 §5, " +
+            "LEGACY_MIGRATION_MODE not enabled. Per FOUNDER OPTION_A_PLUS §5, " +
               "LEGACY_MIGRATION requires explicit Founder approval AND RC1_ACCEPTANCE_PASS.",
           );
         }

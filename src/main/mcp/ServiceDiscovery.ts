@@ -4,12 +4,12 @@
  * 发现来源（按可靠性排序）：
  *   1. 本控制中心当前 Profile 的 transport.expectedLocalPort（我方 V2 runtime）
  *   2. Legacy MCP 自己的 ~/.local-files-mcp/config.json → server.port
- *   3. 当前 Profile 配置的端口
+ *   3. 少量已知端口（48765 Legacy 桥、48766、8765）
  *
  * 判定靠响应体特征，不靠端口号猜：
  *   - 有 workspaceId              → company-bridge（Legacy 生产桥）
  *   - 有 mcp_path / auth_mode     → local-files-mcp
- *   - 有 healthFingerprint 或 service==="mcp-bridge" 且版本 2.x → our-runtime
+ *   - 有 healthFingerprint 或 service==="c2c-bridge" 且版本 2.x → our-runtime
  *   - 其它能返回 /health 的        → unknown（仍然显示，标明未知）
  */
 import { promises as fs } from "node:fs";
@@ -98,8 +98,8 @@ function classify(body: Record<string, unknown>): ServiceKind {
   if (typeof body.workspaceId === "string" && body.workspaceId.length > 0) return "company-bridge";
   if (typeof body.mcp_path === "string" || typeof body.auth_mode === "string") return "local-files-mcp";
   if (typeof body.healthFingerprint === "string") return "our-runtime";
-  if (body.service === "mcp-bridge" && /^2\./.test(version)) return "our-runtime";
-  if (body.service === "mcp-bridge") return "company-bridge";
+  if (body.service === "c2c-bridge" && /^2\./.test(version)) return "our-runtime";
+  if (body.service === "c2c-bridge") return "company-bridge";
   return "unknown";
 }
 
@@ -137,7 +137,7 @@ async function peerPort(): Promise<number | null> {
   return null;
 }
 
-export async function discoverServices(stateRoot: string, knownPorts: number[] = []): Promise<DiscoveryResult> {
+export async function discoverServices(stateRoot: string): Promise<DiscoveryResult> {
   const candidates = new Map<number, DiscoveredService["source"]>();
   const add = (port: number | null, source: DiscoveredService["source"]): void => {
     if (port && port >= 1024 && port <= 65535 && !candidates.has(port)) candidates.set(port, source);
@@ -145,8 +145,7 @@ export async function discoverServices(stateRoot: string, knownPorts: number[] =
 
   add(await ourProfilePort(stateRoot), "profile");
   add(await peerPort(), "peer-config");
-  // 已知端口：只来自调用方传入的配置，不再写死内部端口。
-  for (const p of knownPorts) add(p, "known");
+  for (const p of [48765, 48766, 48766, 8765]) add(p, "known");
 
   const services: DiscoveredService[] = [];
   for (const [port, source] of candidates) {

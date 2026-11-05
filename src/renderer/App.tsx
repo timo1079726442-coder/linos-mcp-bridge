@@ -226,7 +226,7 @@ export function App(): JSX.Element {
         <Route
           path="/settings/clients"
           element={
-            <SectionTabs title="设置" description="给 Cursor / Claude / Agent 等客户端接入本机 MCP。" tabs={settingsTabs}>
+            <SectionTabs title="设置" description="给 Cursor / Claude / Codex 等客户端接入本机 MCP。" tabs={settingsTabs}>
               <SettingsClientsPage />
             </SectionTabs>
           }

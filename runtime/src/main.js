@@ -7,7 +7,7 @@
  *
  * Secret intake order (Production):
  *   1. stdin pipe (preferred; mandatory in production)
- *   2. env (only if MCP_BRIDGE_ALLOW_ENV_SECRET=1; for tests)
+ *   2. env (only if C2C_RUNTIME_ALLOW_ENV_SECRET=1; for tests)
  *
  * Fails closed if no secret is provided.
  */
@@ -51,7 +51,7 @@ async function main() {
         secret = tryReadSecretFromEnv();
     }
     if (!secret) {
-        console.error("FATAL: no runtimeInstanceSecret on stdin and MCP_BRIDGE_ALLOW_ENV_SECRET != 1");
+        console.error("FATAL: no runtimeInstanceSecret on stdin and C2C_RUNTIME_ALLOW_ENV_SECRET != 1");
         process.exit(3);
     }
     setSecret(secret);

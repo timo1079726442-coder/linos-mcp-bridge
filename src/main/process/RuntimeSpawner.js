@@ -1,12 +1,12 @@
 /**
- * RuntimeSpawner — spawn the Runtime child process with strict IPC and
+ * RuntimeSpawner — spawn the C2C Runtime child process with strict IPC and
  * secret-injection semantics.
  *
- * Per ADR-0002 §2 (SECRET_STDIN_ONLY_PRODUCTION):
+ * Per FOUNDER OPTION_A_PLUS §2 (SECRET_STDIN_ONLY_PRODUCTION):
  *   - Default: secret delivered via stdin pipe ONLY
- *   - env fallback: ONLY when MCP_BRIDGE_ALLOW_ENV_SECRET=1 AND
+ *   - env fallback: ONLY when C2C_RUNTIME_ALLOW_ENV_SECRET=1 AND
  *     allowEnvSecretFallback=true is passed to spawn()
- *   - env must NEVER contain MCP_BRIDGE_RUNTIME_INSTANCE_SECRET in production
+ *   - env must NEVER contain C2C_RUNTIME_INSTANCE_SECRET in production
  *   - command line must NEVER contain the secret
  *
  * Tests inject a custom spawnFn to inspect argv + env without actually
@@ -38,13 +38,13 @@ export class RuntimeSpawner {
     }
     spawn(spawnFn = defaultSpawn) {
         const childEnv = { ...process.env };
-        delete childEnv.MCP_BRIDGE_RUNTIME_INSTANCE_SECRET;
+        delete childEnv.C2C_RUNTIME_INSTANCE_SECRET;
         if (this.opts.allowEnvSecretFallback === true) {
-            if (process.env.MCP_BRIDGE_ALLOW_ENV_SECRET !== "1") {
+            if (process.env.C2C_RUNTIME_ALLOW_ENV_SECRET !== "1") {
                 throw new Error("SECRET_STDIN_ONLY_PRODUCTION: allowEnvSecretFallback=true requires " +
-                    "MCP_BRIDGE_ALLOW_ENV_SECRET=1 env var. Refusing to spawn with secret in child env.");
+                    "C2C_RUNTIME_ALLOW_ENV_SECRET=1 env var. Refusing to spawn with secret in child env.");
             }
-            childEnv.MCP_BRIDGE_RUNTIME_INSTANCE_SECRET = this.opts.runtimeInstanceSecret.toString("base64url");
+            childEnv.C2C_RUNTIME_INSTANCE_SECRET = this.opts.runtimeInstanceSecret.toString("base64url");
         }
         this.assertNoSecretInArgs(this.args, this.opts.runtimeInstanceSecret);
         const encoded = this.opts.runtimeInstanceSecret.toString("base64url");

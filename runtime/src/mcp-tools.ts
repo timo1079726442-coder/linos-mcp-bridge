@@ -856,7 +856,7 @@ async function dispatchMcpInner(
           { name: "test_status", description: "读取 Execution Store 中最近测试状态", inputSchema: emptyObjectSchema() },
           {
             name: "execution_summary",
-            description: "读取已登记的 Agent 执行摘要",
+            description: "读取已登记的 Codex 执行摘要",
             inputSchema: objectSchema({
               limit: { type: "integer", minimum: 1, maximum: 20, description: "最多返回的执行记录数" },
             }),
