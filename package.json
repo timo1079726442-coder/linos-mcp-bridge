@@ -32,7 +32,8 @@
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.preload.json && tsc --noEmit -p tsconfig.renderer.json",
-    "build:portable": "npm run build:runtime && npm run build && electron-builder --win zip"
+    "build:portable": "npm run build:runtime && npm run build && electron-builder --win zip",
+    "lint": "eslint src runtime/src"
   },
   "dependencies": {
     "commander": "^12.0.0",
@@ -44,6 +45,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.11",
@@ -52,9 +54,11 @@
     "concurrently": "^9.0.1",
     "electron": "^33.0.0",
     "electron-builder": "^26.15.3",
+    "eslint": "^9.39.5",
     "happy-dom": "^15.7.4",
     "playwright-core": "^1.63.0",
     "typescript": "^5.6.0",
+    "typescript-eslint": "^8.72.1",
     "vite": "^5.4.8",
     "vitest": "^2.1.2"
   },

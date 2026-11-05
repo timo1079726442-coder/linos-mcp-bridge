@@ -18,6 +18,8 @@ jobs:
       - run: npm run build:runtime
       - run: npm run build
       - run: npm run typecheck
+      # 基线：当前 0 error / 265 warning，先把"新增错误"挡住，逐步收敛 warning
+      - run: npm run lint
       - run: npm test
       # runtime 里有若干依赖真实进程时序的用例（后台任务输出/取消），CI 机器较慢时会偶发失败。
       # 第一次失败自动重跑一次；仍失败才算真失败。

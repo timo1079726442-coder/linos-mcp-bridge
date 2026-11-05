@@ -238,7 +238,12 @@ export class JobStore {
   }
 
   async save(record: JobRecord): Promise<JobRecord> {
-    const next: JobRecord = { ...record, updatedAt: new Date().toISOString() };
+    // 取消是终态：并发写入时（runner 回写 vs cancel 落盘）不允许被覆盖回 RUNNING/FAILED。
+    const existing = await this.get(record.id).catch(() => null);
+    const effective = existing?.state === "CANCELLED" && record.state !== "CANCELLED"
+      ? { ...record, state: "CANCELLED" as const, cancelRequested: true }
+      : record;
+    const next: JobRecord = { ...effective, updatedAt: new Date().toISOString() };
     await writeAtomicJson(jobFile(this.requireDir(), record.id), next);
     return next;
   }

@@ -107,7 +107,10 @@ export async function recoverInterruptedJobs(store: JobStore, now = Date.now(), 
     if ((record.state === "RUNNING" || record.state === "QUEUED") && !activeJobs.has(record.id)) {
       const heartbeatAgeMs = record.lastHeartbeatAt ? now - Date.parse(record.lastHeartbeatAt) : Number.POSITIVE_INFINITY;
       const createdAgeMs = now - Date.parse(record.createdAt);
-      if (!Number.isFinite(heartbeatAgeMs) || heartbeatAgeMs > staleAfterMs || createdAgeMs > staleAfterMs) {
+      const createdIsStale = Number.isFinite(createdAgeMs) && createdAgeMs > staleAfterMs;
+      const heartbeatIsStale = !Number.isFinite(heartbeatAgeMs) || heartbeatAgeMs > staleAfterMs;
+      // 两个条件都要满足才算孤儿：刚创建、还没写第一条心跳的任务不能被当成"已中断"。
+      if (createdIsStale && heartbeatIsStale) {
         const next: JobRecord = {
           ...record,
           state: "INTERRUPTED",
@@ -127,7 +130,15 @@ export async function cancelActiveJob(store: JobStore, id: string): Promise<JobR
   const controller = activeJobs.get(id);
   const record = await store.get(id);
   if (!controller || (record.state !== "RUNNING" && record.state !== "QUEUED")) throw new Error("JOB_NOT_RUNNING");
-  const next: JobRecord = { ...record, cancelRequested: true };
+  // 先把"取消"写进记录并落成终态：进程被 kill 后退出码非 0，若等 runner 回写会把 CANCELLED 覆盖成 FAILED。
+  const next: JobRecord = {
+    ...record,
+    cancelRequested: true,
+    state: "CANCELLED",
+    errorCode: "JOB_CANCELLED",
+    finishedAt: new Date().toISOString(),
+    durationMs: Math.max(0, Date.now() - Date.parse(record.startedAt ?? record.createdAt)),
+  };
   await store.save(next);
   controller.cancelRequested = true;
   const child = controller.child;
@@ -336,6 +347,11 @@ async function runJob(
       await flushLines(true);
     }
     const latest = await store.get(id);
+    // 取消是终态：runner 不得用退出码把它改写成 FAILED。
+    if (latest.state === "CANCELLED") {
+      await flushLines(true);
+      return;
+    }
     const durationMs = Date.now() - startedWall;
     const cancelled = latest.cancelRequested === true;
     const timedOut = latest.timedOut === true;
