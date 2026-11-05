@@ -61,3 +61,8 @@ tools/
 !src/**/logs/
 !src/**/logs/**
 
+# 构建产物与发行附件（走 Release，不入库）
+release-portable/
+*.zip
+!extension/
+
