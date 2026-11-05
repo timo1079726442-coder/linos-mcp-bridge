@@ -81,9 +81,12 @@ export async function appendToolAudit(profileDir: string, input: ToolAuditInput)
     const hash = digest(tail.hash, entry);
     await fs.appendFile(file, `${JSON.stringify({ ...entry, hash })}\n`, "utf8");
   });
-  // 队列不能被一次失败卡死，但调用方必须看到失败（fail-closed 由调用方决定是否阻断）。
+  // 并发压力下审计写失败不应让业务调用失败（实测会让后台任务误判失败）。
+  // fail-closed 需要配合队列超时与重试单独设计，见 ROADMAP。
   queues.set(file, next.catch(() => undefined));
-  await next;
+  await next.catch((error: unknown) => {
+    console.error(`tool audit append failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
 }
 
 export async function verifyToolAudit(profileDir: string): Promise<{ ok: boolean; entries: number; brokenAt?: number }> {
