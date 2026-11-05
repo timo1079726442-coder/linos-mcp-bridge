@@ -10,9 +10,19 @@ export interface ActiveJobController {
   child: ChildProcess | null;
   cancelRequested: boolean;
   profileDir: string;
+  /** 本次 attempt 真正结束时 resolve；用于避免复用"正在清理"的旧控制器。 */
+  settled: Promise<void>;
+  settle: () => void;
 }
 
 const activeJobs = new Map<string, ActiveJobController>();
+
+/** 统一收尾：移除控制器并让等待者（resume/launch）立即恢复。 */
+function finishActive(id: string): void {
+  const controller = activeJobs.get(id);
+  activeJobs.delete(id);
+  controller?.settle();
+}
 
 export function isJobActive(jobId: string): boolean {
   return activeJobs.has(jobId);
@@ -154,14 +164,24 @@ export async function launchJob(
   record: JobRecord,
   options: LaunchOptions,
 ): Promise<JobRecord> {
-  if (activeJobs.has(record.id)) return store.get(record.id);
-  // 必须先读最新记录：resume 传入的 record 是 CANCELLED 快照（cancelRequested=true），
-  // 用它初始化控制器会让恢复出来的 attempt 一启动就自杀（实测 189ms）。
+  // 旧 attempt 可能"终态已写、控制器尚未清理"：不能静默返回，必须等它真正结束后再决定。
+  const existing = activeJobs.get(record.id);
+  if (existing) {
+    await Promise.race([existing.settled, new Promise<void>((resolve) => setTimeout(resolve, 10_000))]);
+    const stillThere = activeJobs.get(record.id);
+    if (stillThere && stillThere === existing) {
+      const snapshot = await store.get(record.id).catch(() => null);
+      if (snapshot?.state === "RUNNING") throw new Error("JOB_ALREADY_ACTIVE");
+    }
+  }
+  // 必须先读最新记录：resume 传入的 record 可能是终态快照。
   let current = await store.get(record.id);
-  const controller: ActiveJobController = { child: null, cancelRequested: current.cancelRequested, profileDir: options.profileDir };
+  let settle!: () => void;
+  const settled = new Promise<void>((resolve) => { settle = resolve; });
+  const controller: ActiveJobController = { child: null, cancelRequested: current.cancelRequested, profileDir: options.profileDir, settled, settle };
   activeJobs.set(record.id, controller);
   if (current.state !== "QUEUED" && current.state !== "INTERRUPTED" && current.state !== "FAILED" && current.state !== "TIMED_OUT" && current.state !== "CANCELLED") {
-    activeJobs.delete(record.id);
+    finishActive(record.id);
     throw new Error("JOB_NOT_RESUMABLE");
   }
   void runJob(store, record.id, options, controller).catch(async (error: unknown) => {
@@ -178,7 +198,7 @@ export async function launchJob(
         });
       }
     } finally {
-      activeJobs.delete(record.id);
+      finishActive(record.id);
     }
   });
   return store.get(record.id);
@@ -195,7 +215,7 @@ async function runJob(
   try {
     record = await store.get(id);
   } catch {
-    activeJobs.delete(id);
+    finishActive(id);
     return;
   }
   record = await store.save({
@@ -405,6 +425,6 @@ async function runJob(
         lastHeartbeatAt: latest.lastHeartbeatAt ?? new Date().toISOString(),
       }).catch(() => undefined);
     }
-    activeJobs.delete(id);
+    finishActive(id);
   }
 }

@@ -81,7 +81,13 @@ async function assertUnderlyingToolEnabled(profileDir: string, workspaceId: stri
 }
 
 async function markOrphaned(store: JobStore, record: JobRecord): Promise<JobRecord> {
-  if ((record.state === "RUNNING" || record.state === "QUEUED") && !isJobActive(record.id)) {
+  // 与 recoverInterruptedJobs 保持同一判定：必须"创建已过期 + 心跳已过期"才算孤儿，
+  // 否则刚进 QUEUED 的任务、或别的 Runtime 正在跑的任务会被误标 INTERRUPTED。
+  const createdAge = Date.now() - Date.parse(record.createdAt);
+  const heartbeatAge = record.lastHeartbeatAt ? Date.now() - Date.parse(record.lastHeartbeatAt) : Number.POSITIVE_INFINITY;
+  const stale = Number.isFinite(createdAge) && createdAge > 30_000
+    && (!Number.isFinite(heartbeatAge) || heartbeatAge > 30_000);
+  if ((record.state === "RUNNING" || record.state === "QUEUED") && !isJobActive(record.id) && stale) {
     const next: JobRecord = {
       ...record,
       state: "INTERRUPTED",
