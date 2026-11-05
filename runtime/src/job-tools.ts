@@ -116,6 +116,16 @@ async function ensureActiveSlot(store: JobStore, profileDir: string): Promise<vo
   }
 }
 
+/**
+ * 诊断注入点：只有测试构造的 ws 会带 timeline 属性；生产 ws 没有该属性。
+ * 不写配置、不读环境变量、不暴露 MCP 参数。
+ */
+function timelineOf(ws: unknown): ((event: import("./job-timeline.js").TimelineEvent) => void) | undefined {
+  const candidate = (ws as { timeline?: unknown } | null)?.timeline;
+  return typeof candidate === "function"
+    ? (candidate as (event: import("./job-timeline.js").TimelineEvent) => void)
+    : undefined;
+}
 export async function startJobTool(
   ws: JobWorkspace,
   args: Record<string, unknown>,
@@ -129,7 +139,7 @@ export async function startJobTool(
     throw new Error("JOB_ACTION_UNSUPPORTED");
   }
   await assertUnderlyingToolEnabled(profileDir, ws.workspaceId, action);
-  const store = new JobStore(profileDir, ws.workspaceId);
+  const store = new JobStore(profileDir, ws.workspaceId, timelineOf(ws));
   const idempotencyKey = cleanIdempotencyKey(args.idempotency_key);
   const label = cleanLabel(args.label) ?? `${action} job`;
   if (idempotencyKey) {
@@ -191,6 +201,7 @@ export async function startJobTool(
   };
   const created = await store.create(input);
   await launchJob(store, created, {
+    timeline: timelineOf(ws),
     workspaceRoot: ws.boundary.rootReal,
     profileDir,
     workspaceId: ws.workspaceId,
@@ -201,7 +212,7 @@ export async function startJobTool(
 
 export async function jobStatusTool(ws: JobWorkspace, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const clientId = requireCaller(ws);
-  const store = new JobStore(ws.profileDir || null, ws.workspaceId);
+  const store = new JobStore(ws.profileDir || null, ws.workspaceId, timelineOf(ws));
   const id = typeof args.job_id === "string" ? args.job_id : "";
   let record = await store.get(id);
   requireSameWorkspace(record, ws.workspaceId);
@@ -219,7 +230,7 @@ export async function jobStatusTool(ws: JobWorkspace, args: Record<string, unkno
 
 export async function jobListTool(ws: JobWorkspace, args: Record<string, unknown>): Promise<{ jobs: Array<Record<string, unknown>> }> {
   const clientId = requireCaller(ws);
-  const store = new JobStore(ws.profileDir || null, ws.workspaceId);
+  const store = new JobStore(ws.profileDir || null, ws.workspaceId, timelineOf(ws));
   const limit = typeof args.limit === "number" ? args.limit : 20;
   const records = await store.list(limit);
   const owned = records.filter((record) => record.spec.clientId === clientId && record.spec.workspaceId === ws.workspaceId);
@@ -247,7 +258,7 @@ export async function jobListTool(ws: JobWorkspace, args: Record<string, unknown
 
 export async function jobOutputTool(ws: JobWorkspace, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const clientId = requireCaller(ws);
-  const store = new JobStore(ws.profileDir || null, ws.workspaceId);
+  const store = new JobStore(ws.profileDir || null, ws.workspaceId, timelineOf(ws));
   const id = typeof args.job_id === "string" ? args.job_id : "";
   const record = await store.get(id);
   requireSameWorkspace(record, ws.workspaceId);
@@ -278,7 +289,7 @@ async function waitForTerminal(store: JobStore, id: string, timeoutMs: number): 
 
 export async function jobCancelTool(ws: JobWorkspace, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const clientId = requireCaller(ws);
-  const store = new JobStore(ws.profileDir || null, ws.workspaceId);
+  const store = new JobStore(ws.profileDir || null, ws.workspaceId, timelineOf(ws));
   const id = typeof args.job_id === "string" ? args.job_id : "";
   let record = await store.get(id);
   requireSameWorkspace(record, ws.workspaceId);
@@ -296,7 +307,7 @@ export async function jobCancelTool(ws: JobWorkspace, args: Record<string, unkno
 export async function jobResumeTool(ws: JobWorkspace, args: Record<string, unknown>): Promise<{ job_id: string; state: string; poll_hint_ms: number }> {
   const clientId = requireCaller(ws);
   requireShellScope(ws);
-  const store = new JobStore(ws.profileDir || null, ws.workspaceId);
+  const store = new JobStore(ws.profileDir || null, ws.workspaceId, timelineOf(ws));
   const id = typeof args.job_id === "string" ? args.job_id : "";
   let record = await store.get(id);
   requireSameWorkspace(record, ws.workspaceId);
@@ -309,6 +320,7 @@ export async function jobResumeTool(ws: JobWorkspace, args: Record<string, unkno
   await recoverInterruptedJobsForResume(store, record);
   const { launchJob } = await import("./job-runner.js");
   await launchJob(store, record, {
+    timeline: timelineOf(ws),
     workspaceRoot: ws.boundary.rootReal,
     profileDir: ws.profileDir,
     workspaceId: ws.workspaceId,

@@ -13,6 +13,13 @@ export interface TimelineEvent {
   attempt_id: string;
   event:
     | "LAUNCH_RESERVED"
+    | "STORE_SAVE_BEGIN"
+    | "STORE_ATOMIC_WRITE_BEGIN"
+    | "STORE_ATOMIC_WRITE_END"
+    | "STORE_SAVE_END"
+    | "STORE_SAVE_ERROR"
+    | "TERMINAL_PERSISTED"
+    | "CONTROLLER_SETTLED"
     | "LAUNCH_REJECTED"
     | "STORE_SAVE_BEGIN"
     | "STORE_SAVE_END"

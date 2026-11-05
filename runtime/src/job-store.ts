@@ -140,10 +140,17 @@ function logFile(dir: string, id: string): string {
 export class JobStore {
   private readonly directory: string | null;
   private readonly workspaceId: string;
+  /** 诊断用（仅测试注入）；生产为 undefined，不写任何文件。 */
+  private readonly timeline?: (event: import("./job-timeline.js").TimelineEvent) => void;
 
-  constructor(profileDir: string | null, workspaceId: string) {
+  constructor(
+    profileDir: string | null,
+    workspaceId: string,
+    timeline?: (event: import("./job-timeline.js").TimelineEvent) => void,
+  ) {
     this.workspaceId = safeWorkspaceId(workspaceId);
     this.directory = profileDir ? path.join(profileDir, "jobs", this.workspaceId) : null;
+    this.timeline = timeline;
   }
 
   private requireDir(): string {
@@ -238,14 +245,25 @@ export class JobStore {
   }
 
   async save(record: JobRecord): Promise<JobRecord> {
-    // 取消是终态：并发写入时（runner 回写 vs cancel 落盘）不允许被覆盖回 RUNNING/FAILED。
-    const existing = await this.get(record.id).catch(() => null);
-    const effective = existing?.state === "CANCELLED" && record.state !== "CANCELLED"
-      ? { ...record, state: "CANCELLED" as const, cancelRequested: true }
-      : record;
-    const next: JobRecord = { ...effective, updatedAt: new Date().toISOString() };
-    await writeAtomicJson(jobFile(this.requireDir(), record.id), next);
-    return next;
+    const attemptId = String(record.attempts);
+    const base = { job_id: record.id, attempt_id: attemptId };
+    this.timeline?.({ ...base, event: "STORE_SAVE_BEGIN" });
+    try {
+      // 取消是终态：并发写入时（runner 回写 vs cancel 落盘）不允许被覆盖回 RUNNING/FAILED。
+      const existing = await this.get(record.id).catch(() => null);
+      const effective = existing?.state === "CANCELLED" && record.state !== "CANCELLED"
+        ? { ...record, state: "CANCELLED" as const, cancelRequested: true }
+        : record;
+      const next: JobRecord = { ...effective, updatedAt: new Date().toISOString() };
+      this.timeline?.({ ...base, event: "STORE_ATOMIC_WRITE_BEGIN" });
+      await writeAtomicJson(jobFile(this.requireDir(), record.id), next);
+      this.timeline?.({ ...base, event: "STORE_ATOMIC_WRITE_END" });
+      this.timeline?.({ ...base, event: "STORE_SAVE_END" });
+      return next;
+    } catch (error) {
+      this.timeline?.({ ...base, event: "STORE_SAVE_ERROR" });
+      throw error;
+    }
   }
 
   async findActiveByIdempotencyKey(input: { clientId: string; idempotencyKey: string }): Promise<JobRecord | null> {

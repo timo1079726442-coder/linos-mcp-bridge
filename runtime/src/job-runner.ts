@@ -366,6 +366,7 @@ async function runJob(
       ]);
       finished = true;
       exitCode = outcome.kind === "exit" ? outcome.code : null;
+      emitRun({ job_id: id, attempt_id: attemptId, event: "PROCESS_EXITED", pid: controller.child?.pid ?? null, exit_code: exitCode });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg === "JOB_JOIN_TIMEOUT") {
