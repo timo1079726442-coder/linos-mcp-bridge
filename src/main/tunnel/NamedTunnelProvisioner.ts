@@ -36,6 +36,8 @@ export interface ProvisionResult {
   /** cloudflared 可执行文件绝对路径；写入 Profile 后 Transport 启动才不用 PATH 猜。 */
   binaryPath: string;
   publicMcpUrl: string;
+  /** DNS 结论：PASS=已确认真指向；UNVERIFIED=查询失败无法确认；FAIL=指向别处；ROLLBACK_REQUIRED=需人工恢复。 */
+  dnsState?: "PASS" | "UNVERIFIED" | "FAIL" | "ROLLBACK_REQUIRED";
   steps: Array<{ step: string; ok: boolean; detail: string }>;
 }
 
@@ -205,8 +207,9 @@ export async function provisionNamedTunnel(input: {
   const tunnelName = input.tunnelName.trim() || `linos-c2c-${hostname.split(".")[0]}`;
   const zone = zoneFromHostname(hostname);
 
-  const fail = (detail: string): ProvisionResult => ({
+  const fail = (detail: string, dnsState?: ProvisionResult["dnsState"]): ProvisionResult => ({
     ok: false,
+    dnsState,
     tunnelId: "",
     tunnelName,
     hostname,
@@ -274,10 +277,15 @@ export async function provisionNamedTunnel(input: {
   }
 
   // 2) 绑定 DNS。
-  // 必须带 --overwrite-dns：同主机名如果已经被一条**旧隧道**占用（本机历史遗留很常见），
-  // cloudflared 默认只打印 "already exists" 就退出，记录仍指向旧隧道 → 公网 530/1033。
-  // 同时用 DoH 真查一次解析结果，避免"记录存在 = 绑定成功"的假成功。
-  const routed = await run(bin, ["tunnel", "route", "dns", "--overwrite-dns", tunnelName, hostname], 45_000);
+  // 不带 --overwrite-dns：已有记录指向别处时必须人工确认，不能静默改写。
+  // 绑定后用 DoH 真查一次解析结果，避免"记录存在 = 绑定成功"的假成功。
+  // 先看现有记录：如果已经指向别的隧道，不覆盖、直接要求人工处理（避免静默改写生产 DNS）。
+  const before = await dnsTargetMatches(hostname, tunnelId);
+  if (before === false) {
+    steps.push({ step: "dns-precheck", ok: false, detail: `${hostname} 已有 CNAME 指向其他隧道` });
+    return fail(`DNS 已存在且指向别的隧道；本工具不会覆盖。请先删除该记录再重试。`, "ROLLBACK_REQUIRED");
+  }
+  const routed = await run(bin, ["tunnel", "route", "dns", tunnelName, hostname], 45_000);
   const routeAccepted =
     routed.code === 0 || /already exists|already configured|CNAME|overwrit/i.test(routed.stdout + routed.stderr);
   let dnsMatches: boolean | null = false;
@@ -288,17 +296,25 @@ export async function provisionNamedTunnel(input: {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   }
-  const dnsOk = routeAccepted && dnsMatches !== false;
+  const dnsState: NonNullable<ProvisionResult["dnsState"]> =
+    dnsMatches === true ? "PASS" : dnsMatches === false ? "FAIL" : "UNVERIFIED";
   steps.push({
     step: "dns",
-    ok: dnsOk,
-    detail: dnsOk
-      ? `DNS 已指向 ${hostname} → ${tunnelId}.cfargotunnel.com${dnsMatches === null ? "（解析未及验证）" : ""}`
-      : dnsMatches === false
-        ? `DNS 记录仍指向别的隧道（常见于历史遗留记录）。请确认 ${hostname} 的 CNAME 指向 ${tunnelId}.cfargotunnel.com`
-        : `DNS 绑定失败：${(routed.stderr || routed.stdout).trim().split(/\r?\n/).slice(-1).join("")}`,
+    ok: dnsState === "PASS",
+    detail: dnsState === "PASS"
+      ? `DNS 已确认指向 ${hostname} → ${tunnelId}.cfargotunnel.com`
+      : dnsState === "FAIL"
+        ? `DNS 仍指向别的隧道。请把 ${hostname} 的 CNAME 改为 ${tunnelId}.cfargotunnel.com`
+        : `DNS 绑定命令已执行，但查询失败无法确认（${(routed.stderr || routed.stdout).trim().split(/\r?\n/).slice(-1).join("") || "无输出"}）。请用 Resolve-DnsName ${hostname} 复核后再启动隧道。`,
   });
-  if (!dnsOk) return fail("DNS 未指向本次隧道，公网会返回 530/1033。请修正记录后重试。");
+  if (dnsState === "FAIL") {
+    return { ...fail("DNS 指向错误，公网会返回 530/1033。", "FAIL") };
+  }
+  if (dnsState === "UNVERIFIED") {
+    return {
+      ...fail("DNS 结果无法验证（查询失败），不能当作成功。", "UNVERIFIED"),
+    };
+  }
 
   // 3) 写 cloudflared 配置（供 --config 启动）
   const configPath = path.join(CLOUDFLARED_DIR, `linos-c2c-${tunnelId}.yml`);
