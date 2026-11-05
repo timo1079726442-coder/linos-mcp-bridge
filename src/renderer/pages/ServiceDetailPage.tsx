@@ -3,7 +3,6 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { ProfileConfig } from "../../shared/types.js";
 import type { ManagedServiceView } from "../../shared/multiService.js";
 import { ToolPolicyPanel } from "../components/ToolPolicyPanel.tsx";
-import { WriteAuthorizationPage } from "./WriteAuthorization.tsx";
 
 type Tab = "overview" | "connect" | "tunnel" | "permissions" | "audit";
 
@@ -65,12 +64,11 @@ export function ServiceDetailPage(): JSX.Element {
       <div className="v2-page">
         <div className="v2-page-head">
           <div>
-            <div className="page-title">内部 Codex 桥（48765）</div>
+            <div className="page-title">内部 Agent 桥（48765）</div>
             <p className="muted v2-subtitle">这是内部固定使用的桥，不影响 C2C Runtime（48766）。</p>
           </div>
           <Link className="btn secondary" to="/services">← 返回服务列表</Link>
         </div>
-        <WriteAuthorizationPage />
       </div>
     );
   }

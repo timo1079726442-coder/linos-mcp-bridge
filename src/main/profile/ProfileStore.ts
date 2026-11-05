@@ -19,9 +19,9 @@ import { DeviceIdentity } from "./DeviceIdentity.js";
 /**
  * V2IsolationConfig — single source of truth for V2 isolation defaults.
  *
- * Per FOUNDER OPTION_A_PLUS:
+ * Per ADR-0002:
  *   - V2_DEFAULT_ISOLATION = TRUE
- *   - V2_LOCAL_PORT = 48766 (NOT 48765)
+ *   - V2_LOCAL_PORT = 48766（默认端口，可改）
  *   - V2_DEFAULT_TRANSPORT = LOCAL_ONLY
  *   - V2_PUBLIC_HOSTNAME_DEFAULT = DISABLED
  *   - AUTO_PRODUCTION_TAKEOVER = FALSE
@@ -32,11 +32,10 @@ export const V2IsolationConfig = {
   V2_LOCAL_PORT: 48766,
   V2_DEFAULT_TRANSPORT: "LOCAL_ONLY",
   V2_PUBLIC_HOSTNAME_DEFAULT: "DISABLED",
-  COMPANY_PRODUCTION_PROTECTED: true,
+  LEGACY_INSTANCE_PROTECTED: true,
   AUTO_PRODUCTION_TAKEOVER: false,
   LEGACY_MIGRATION_MODE_DEFAULT: false,
   RUNTIME_PROCESS_EXEC_PATH_DEFAULT_REMOVED: true,
-  RESERVED_PORT: 48765,
   RESERVED_HOSTNAME: "mcp-legacy.example.com",
   RESERVED_TUNNEL_NAME: "mcpbridge-tunnel",
 } as const;

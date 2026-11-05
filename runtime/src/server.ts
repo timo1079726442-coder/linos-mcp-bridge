@@ -17,7 +17,7 @@ import { appendToolAudit } from "./tool-audit.js";
 import { ExecutionRecordStore } from "./execution-store.js";
 import { JobStore } from "./job-store.js";
 import { recoverInterruptedJobs } from "./job-runner.js";
-import { ExecutionStoreProducer, type CodexTaskCompletionEvent } from "./execution-producer.js";
+import { ExecutionStoreProducer, type AgentTaskCompletionEvent } from "./execution-producer.js";
 import {
   authCodes,
   clientRegistry,
@@ -189,7 +189,7 @@ export async function startServer(opts: ServerOptions): Promise<RuntimeServerHan
   // ----- Health (public; minimal identity) -----
   app.get("/health", (_req, res) => {
     res.json({
-      service: "c2c-bridge",
+      service: "mcp-bridge",
       version: "2.0.0",
       status: "ok",
       healthFingerprint: healthFp,
@@ -204,7 +204,7 @@ export async function startServer(opts: ServerOptions): Promise<RuntimeServerHan
     const policy = loaded?.policy ?? null;
     res.json({
       ok: true,
-      service: "c2c-bridge",
+      service: "mcp-bridge",
       name: "LinOS C2C Runtime",
       version: "2.0.0",
       mcp_path: "/mcp",
@@ -340,7 +340,7 @@ export async function startServer(opts: ServerOptions): Promise<RuntimeServerHan
 
   app.get("/admin/info", adminGuard, (_req, res) => {
     res.json({
-      service: "c2c-bridge",
+      service: "mcp-bridge",
       version: "2.0.0",
       deviceId: opts.identity.deviceId,
       profileId: opts.identity.profileId,
@@ -429,7 +429,7 @@ export async function startServer(opts: ServerOptions): Promise<RuntimeServerHan
     res.status(204).end();
   });
 
-  // Supervisor-bound Codex/Harness completion ingress. The Runtime is the
+  // Supervisor-bound agent completion ingress. The Runtime is the
   // only writer of the Execution Store; the loopback Capability-MAC prevents
   // the public MCP surface from becoming an execution-record producer.
   app.post("/admin/execution/complete", express.json({ limit: "64kb" }), adminGuard, async (req, res) => {
@@ -437,13 +437,13 @@ export async function startServer(opts: ServerOptions): Promise<RuntimeServerHan
       res.status(503).json({ error: "execution_store_unavailable" });
       return;
     }
-    const event = req.body as Partial<CodexTaskCompletionEvent>;
-    if (!isCodexTaskCompletionEvent(event)) {
+    const event = req.body as Partial<AgentTaskCompletionEvent>;
+    if (!isAgentTaskCompletionEvent(event)) {
       res.status(400).json({ error: "invalid_execution_completion" });
       return;
     }
     try {
-      const record = await executionProducer.publishCodexTaskCompleted(event);
+      const record = await executionProducer.publishAgentTaskCompleted(event);
       res.status(201).json({
         id: record.id,
         taskId: record.taskId,
@@ -1091,7 +1091,7 @@ export async function startServer(opts: ServerOptions): Promise<RuntimeServerHan
   }
 
   /**
-   * 本机签发的长期 API 令牌（给 Claude / Cursor / Codex 等不实现动态注册的客户端用）。
+   * 本机签发的长期 API 令牌（给 Claude / Cursor / Agent 等不实现动态注册的客户端用）。
    * 文件：<stateRoot>/profiles/<profileId>/mcp-token.json，只存 sha256，明文只在生成时展示一次。
    */
   // 用容器而不是 let：函数在 app.listen 之后才执行到声明处，直接 let 会触发 TDZ。
@@ -1200,7 +1200,7 @@ function safeRegisteredRedirect(request: { clientId: string; redirectUri: string
   return validateRedirectUri(request.redirectUri, trustedOrigins).ok ? request.redirectUri : null;
 }
 
-function isCodexTaskCompletionEvent(value: Partial<CodexTaskCompletionEvent>): value is CodexTaskCompletionEvent {
+function isAgentTaskCompletionEvent(value: Partial<AgentTaskCompletionEvent>): value is AgentTaskCompletionEvent {
   return typeof value.taskId === "string"
     && Number.isInteger(value.iteration)
     && (value.status === "PASS" || value.status === "FAIL" || value.status === "UNKNOWN")

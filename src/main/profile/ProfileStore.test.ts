@@ -200,7 +200,7 @@ describe("ProfileStore", () => {
     expect(prepared.result.settings.credentialConfigured).toBe(true);
   });
 
-  it("service config refuses Legacy Production hostname", async () => {
+  it("service config refuses reserved hostname", async () => {
     const cfg = await store.create({ profileName: "REMOTE", profileType: "custom" });
     const transportDir = join(store.profileDir(cfg.profileId), "transport");
     await mkdir(transportDir, { recursive: true });

@@ -1,7 +1,7 @@
 /**
  * LocalOnlyTransport — V2 default transport.
  *
- * Per FOUNDER OPTION_A_PLUS §2:
+ * Per ADR-0002 §2:
  *   - V2_DEFAULT_TRANSPORT = LOCAL_ONLY
  *   - No Cloudflare tunnel; no DNS; no public hostname
  *   - Readiness layer reports NOT_APPLICABLE

@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { RuntimeResolver } from "./RuntimeResolver.js";
-describe("RuntimeResolver (FOUNDER OPTION_A_PLUS §7)", () => {
+describe("RuntimeResolver (ADR-0002 §7)", () => {
     it("PACKAGED_V2 without bundle dir throws", async () => {
-        delete process.env.C2C_RUNTIME_BUNDLE_DIR;
-        delete process.env.C2C_RUNTIME_ENTRY;
+        delete process.env.MCP_BRIDGE_RUNTIME_BUNDLE_DIR;
+        delete process.env.MCP_BRIDGE_RUNTIME_ENTRY;
         const r = new RuntimeResolver();
         await expect(r.resolve({ profileSource: "PACKAGED_V2", workspaceRoot: "C:\workspace" })).rejects.toThrow(/RUNTIME_NOT_FOUND/);
     });
@@ -24,15 +24,15 @@ describe("RuntimeResolver (FOUNDER OPTION_A_PLUS §7)", () => {
         const r = new RuntimeResolver();
         await expect(r.resolve({ profileSource: "LEGACY_MIGRATION", workspaceRoot: "C:\workspace" })).rejects.toThrow(/C2C_LEGACY_RUNTIME_DIR/);
     });
-    it("PACKAGED_V2 with explicit C2C_RUNTIME_BUNDLE_DIR resolves when file exists", async () => {
+    it("PACKAGED_V2 with explicit MCP_BRIDGE_RUNTIME_BUNDLE_DIR resolves when file exists", async () => {
         const { mkdtemp, writeFile, mkdir, rm } = await import("node:fs/promises");
         const { tmpdir } = await import("node:os");
         const { join } = await import("node:path");
         const dir = await mkdtemp(join(tmpdir(), "c2c-rt-"));
         await mkdir(join(dir, "dist"), { recursive: true });
         await writeFile(join(dir, "dist", "main.js"), "// stub");
-        process.env.C2C_RUNTIME_BUNDLE_DIR = dir;
-        delete process.env.C2C_RUNTIME_ENTRY;
+        process.env.MCP_BRIDGE_RUNTIME_BUNDLE_DIR = dir;
+        delete process.env.MCP_BRIDGE_RUNTIME_ENTRY;
         try {
             const r = new RuntimeResolver();
             const res = await r.resolve({ profileSource: "PACKAGED_V2", workspaceRoot: "C:\workspace" });
@@ -42,18 +42,18 @@ describe("RuntimeResolver (FOUNDER OPTION_A_PLUS §7)", () => {
         }
         finally {
             await rm(dir, { recursive: true, force: true });
-            delete process.env.C2C_RUNTIME_BUNDLE_DIR;
+            delete process.env.MCP_BRIDGE_RUNTIME_BUNDLE_DIR;
         }
     });
-    it("PACKAGED_V2 with explicit C2C_RUNTIME_ENTRY resolves when file exists", async () => {
+    it("PACKAGED_V2 with explicit MCP_BRIDGE_RUNTIME_ENTRY resolves when file exists", async () => {
         const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
         const { tmpdir } = await import("node:os");
         const { join } = await import("node:path");
         const dir = await mkdtemp(join(tmpdir(), "c2c-rt-entry-"));
         const entry = join(dir, "main.js");
         await writeFile(entry, "// stub");
-        process.env.C2C_RUNTIME_ENTRY = entry;
-        delete process.env.C2C_RUNTIME_BUNDLE_DIR;
+        process.env.MCP_BRIDGE_RUNTIME_ENTRY = entry;
+        delete process.env.MCP_BRIDGE_RUNTIME_BUNDLE_DIR;
         try {
             const r = new RuntimeResolver();
             const res = await r.resolve({ profileSource: "PACKAGED_V2", workspaceRoot: "C:\workspace" });
@@ -62,7 +62,7 @@ describe("RuntimeResolver (FOUNDER OPTION_A_PLUS §7)", () => {
         }
         finally {
             await rm(dir, { recursive: true, force: true });
-            delete process.env.C2C_RUNTIME_ENTRY;
+            delete process.env.MCP_BRIDGE_RUNTIME_ENTRY;
         }
     });
 });

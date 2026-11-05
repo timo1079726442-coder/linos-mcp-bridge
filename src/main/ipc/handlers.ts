@@ -1827,7 +1827,7 @@ function splitAuditLinesWithOffsets(raw: string): PositionedAuditLine[] {
   return lines;
 }
 
-function isLegacyCodexAuditRecord(record: Record<string, unknown>): boolean {
+function isLegacyAgentAuditRecord(record: Record<string, unknown>): boolean {
   if ("sequence" in record || "previousHash" in record || "recordHash" in record) return false;
   const actor = record.actor;
   if (!actor || typeof actor !== "object" || Array.isArray(actor)) return false;

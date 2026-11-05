@@ -132,7 +132,7 @@ export class SupervisorProcess {
         if (!this.state.pid || !this.state.runtimeInstanceId)
             return;
         const observation = {
-            service: "c2c-bridge",
+            service: "mcp-bridge",
             version: "2.0.0",
             pid: this.state.pid,
             port: this.state.port,

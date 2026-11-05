@@ -1,12 +1,12 @@
 /**
- * RuntimeSpawner — spawn the C2C Runtime child process with strict IPC and
+ * RuntimeSpawner — spawn the Runtime child process with strict IPC and
  * secret-injection semantics.
  *
- * Per FOUNDER OPTION_A_PLUS §2 (SECRET_STDIN_ONLY_PRODUCTION):
+ * Per ADR-0002 §2 (SECRET_STDIN_ONLY_PRODUCTION):
  *   - Default: secret delivered via stdin pipe ONLY
- *   - env fallback: ONLY when C2C_RUNTIME_ALLOW_ENV_SECRET=1 AND
+ *   - env fallback: ONLY when MCP_BRIDGE_ALLOW_ENV_SECRET=1 AND
  *     allowEnvSecretFallback=true is passed to spawn()
- *   - env must NEVER contain C2C_RUNTIME_INSTANCE_SECRET in production
+ *   - env must NEVER contain MCP_BRIDGE_RUNTIME_INSTANCE_SECRET in production
  *   - command line must NEVER contain the secret
  *
  * Tests inject a custom spawnFn to inspect argv + env without actually
@@ -82,13 +82,13 @@ export class RuntimeSpawner {
 
   spawn(spawnFn: SpawnFn = defaultSpawn): SpawnResult {
     const childEnv: NodeJS.ProcessEnv = { ...process.env };
-    delete childEnv.C2C_RUNTIME_INSTANCE_SECRET;
-    delete childEnv.C2C_RUNTIME_SUPERVISOR_BRIDGE_FD;
-    delete childEnv.C2C_RUNTIME_SUPERVISOR_BRIDGE_DIAGNOSTICS;
+    delete childEnv.MCP_BRIDGE_RUNTIME_INSTANCE_SECRET;
+    delete childEnv.MCP_BRIDGE_SUPERVISOR_BRIDGE_FD;
+    delete childEnv.MCP_BRIDGE_SUPERVISOR_BRIDGE_DIAGNOSTICS;
     if (this.opts.enableSupervisorBridge) {
-      childEnv.C2C_RUNTIME_SUPERVISOR_BRIDGE_FD = "3";
+      childEnv.MCP_BRIDGE_SUPERVISOR_BRIDGE_FD = "3";
       // Bridge diagnostics contain only static error categories and are enabled only for isolated CREATE test mode.
-      childEnv.C2C_RUNTIME_SUPERVISOR_BRIDGE_DIAGNOSTICS = "1";
+      childEnv.MCP_BRIDGE_SUPERVISOR_BRIDGE_DIAGNOSTICS = "1";
     }
     // The Runtime entrypoint is a plain Node script (runtime/src/main.ts starts
     // an HTTP server, `#!/usr/bin/env node`, no Electron `app` API). But in the
@@ -102,13 +102,13 @@ export class RuntimeSpawner {
     if (process.versions.electron) childEnv.ELECTRON_RUN_AS_NODE = "1";
 
     if (this.opts.allowEnvSecretFallback === true) {
-      if (process.env.C2C_RUNTIME_ALLOW_ENV_SECRET !== "1") {
+      if (process.env.MCP_BRIDGE_ALLOW_ENV_SECRET !== "1") {
         throw new Error(
           "SECRET_STDIN_ONLY_PRODUCTION: allowEnvSecretFallback=true requires " +
-            "C2C_RUNTIME_ALLOW_ENV_SECRET=1 env var. Refusing to spawn with secret in child env.",
+            "MCP_BRIDGE_ALLOW_ENV_SECRET=1 env var. Refusing to spawn with secret in child env.",
         );
       }
-      childEnv.C2C_RUNTIME_INSTANCE_SECRET = this.opts.runtimeInstanceSecret.toString("base64url");
+      childEnv.MCP_BRIDGE_RUNTIME_INSTANCE_SECRET = this.opts.runtimeInstanceSecret.toString("base64url");
     }
 
     this.assertNoSecretInArgs(this.args, this.opts.runtimeInstanceSecret);

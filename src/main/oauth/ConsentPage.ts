@@ -89,7 +89,7 @@ function scopeLabel(scope: string): string {
     "workspace.read": "Read files in this workspace",
     "workspace.search": "Search this workspace",
     "git.read": "Read git status and diffs",
-    "execution.read": "Read Codex execution summaries",
+    "execution.read": "Read Agent execution summaries",
     "offline_access": "Stay connected between sessions",
   };
   return labels[scope] ?? scope;

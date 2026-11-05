@@ -175,7 +175,7 @@ export async function resolvePowerShellArgv(
   mode: "user" | "constrained",
 ): Promise<{ argv: string[]; display: string }> {
   if (!command.trim() || command.length > 4_000 || command.includes("\0")) throw new Error("COMMAND_INVALID");
-  const exe = process.env.C2C_PWSH || await fs.access("C:\\Program Files\\PowerShell\\7\\pwsh.exe").then(() => "C:\\Program Files\\PowerShell\\7\\pwsh.exe").catch(() => "powershell.exe");
+  const exe = process.env.MCP_BRIDGE_PWSH || await fs.access("C:\\Program Files\\PowerShell\\7\\pwsh.exe").then(() => "C:\\Program Files\\PowerShell\\7\\pwsh.exe").catch(() => "powershell.exe");
   const script = mode === "constrained"
     ? `$ExecutionContext.SessionState.LanguageMode='ConstrainedLanguage'; ${command}`
     : command;

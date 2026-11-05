@@ -19,8 +19,8 @@ describe("V2 Isolation Defaults (OPTION_A_PLUS)", () => {
     expect(V2_ISOLATION.AUTO_PRODUCTION_TAKEOVER).toBe(false);
   });
 
-  it("COMPANY_PRODUCTION_PROTECTED is TRUE", () => {
-    expect(V2_ISOLATION.COMPANY_PRODUCTION_PROTECTED).toBe(true);
+  it("LEGACY_INSTANCE_PROTECTED is TRUE", () => {
+    expect(V2_ISOLATION.LEGACY_INSTANCE_PROTECTED).toBe(true);
   });
 
   it("LEGACY_MIGRATION_MODE_DEFAULT is FALSE", () => {

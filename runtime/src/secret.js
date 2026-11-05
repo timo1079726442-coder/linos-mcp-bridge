@@ -4,13 +4,13 @@
  * Per CP1 SECURITY_MODEL_V2 §4 + the P0 production rule (SECRET_INJECTION
  * = STDIN_PIPE_ONLY), the runtimeInstanceSecret MUST arrive via stdin pipe.
  * The env-var fallback is DISABLED by default in production builds; tests
- * may opt in via C2C_RUNTIME_ALLOW_ENV_SECRET=1.
+ * may opt in via MCP_BRIDGE_ALLOW_ENV_SECRET=1.
  *
  * The secret is read once, immediately stripped from process.env if present,
  * and held only in process memory for the lifetime of the process.
  */
 export const STDIN_SECRET_PREFIX = "c2c_ri_secret_";
-const ALLOW_ENV_SECRET = "C2C_RUNTIME_ALLOW_ENV_SECRET";
+const ALLOW_ENV_SECRET = "MCP_BRIDGE_ALLOW_ENV_SECRET";
 let cachedSecret = null;
 export async function readSecretFromStdin() {
     if (cachedSecret)
@@ -56,13 +56,13 @@ export async function readSecretFromStdin() {
 export function tryReadSecretFromEnv() {
     if (process.env[ALLOW_ENV_SECRET] !== "1")
         return null;
-    const raw = process.env.C2C_RUNTIME_INSTANCE_SECRET;
+    const raw = process.env.MCP_BRIDGE_RUNTIME_INSTANCE_SECRET;
     if (!raw)
         return null;
     const decoded = decodeSecret(raw);
     if (decoded) {
         // Immediately strip from env so it never propagates.
-        delete process.env.C2C_RUNTIME_INSTANCE_SECRET;
+        delete process.env.MCP_BRIDGE_RUNTIME_INSTANCE_SECRET;
     }
     return decoded;
 }

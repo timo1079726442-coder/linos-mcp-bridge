@@ -52,7 +52,7 @@ function freshDefaultPolicy(): WritePolicy {
 export class WritePolicyStore {
   constructor(private readonly stateRoot: string) {}
 
-  /** Absolute path to the policy file. Codex bridge reads this directly. */
+  /** Absolute path to the policy file. Agent bridge reads this directly. */
   policyFilePath(): string {
     return path.join(this.stateRoot, "write-policy.json");
   }

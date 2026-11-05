@@ -19,7 +19,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 /** Open the authenticated IPC channel allocated at stdio index 3. */
 export function openRuntimeSupervisorBridgeStream(diagnosticSink?: BridgeDiagnosticSink): Duplex | undefined {
   const send = process.send;
-  if (process.env.C2C_RUNTIME_SUPERVISOR_BRIDGE_FD !== "3"
+  if (process.env.MCP_BRIDGE_SUPERVISOR_BRIDGE_FD !== "3"
     || !process.connected || typeof send !== "function") return undefined;
 
   const queued: Buffer[] = [];

@@ -252,7 +252,7 @@ export function SettingsPage(): JSX.Element {
       </div>
 
       <div className="card" style={{ marginTop: 14 }}>
-        <div className="section-title">其他 AI 客户端（Claude / Cursor / Codex 等）</div>
+        <div className="section-title">其他 AI 客户端（Claude / Cursor / Agent 等）</div>
         <p className="muted" style={{ fontSize: 12 }}>
           ChatGPT 用 OAuth 连接；其他客户端多数不支持动态注册，用这里的长期令牌接入（Bearer）。
         </p>

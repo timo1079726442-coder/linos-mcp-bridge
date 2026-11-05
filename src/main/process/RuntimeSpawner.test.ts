@@ -62,12 +62,12 @@ function makeOpts(overrides: Partial<ConstructorParameters<typeof RuntimeSpawner
 }
 
 describe("RuntimeSpawner (P0-B SECRET_STDIN_ONLY_PRODUCTION)", () => {
-  it("P0-B TEST_RUNTIME_SECRET_NOT_IN_ENV_DEFAULT: child env does NOT contain C2C_RUNTIME_INSTANCE_SECRET", () => {
+  it("P0-B TEST_RUNTIME_SECRET_NOT_IN_ENV_DEFAULT: child env does NOT contain MCP_BRIDGE_RUNTIME_INSTANCE_SECRET", () => {
     const cap = makeCaptureSpawn();
     const spawner = new RuntimeSpawner(makeOpts());
     const result: SpawnResult = spawner.spawn(cap.spawn);
-    expect(result.captured.env.C2C_RUNTIME_INSTANCE_SECRET).toBeUndefined();
-    expect(cap.last?.env.C2C_RUNTIME_INSTANCE_SECRET).toBeUndefined();
+    expect(result.captured.env.MCP_BRIDGE_RUNTIME_INSTANCE_SECRET).toBeUndefined();
+    expect(cap.last?.env.MCP_BRIDGE_RUNTIME_INSTANCE_SECRET).toBeUndefined();
   });
 
   it("P0-B TEST_RUNTIME_SECRET_NOT_IN_COMMAND_LINE: argv is free of secret", () => {
@@ -98,40 +98,40 @@ describe("RuntimeSpawner (P0-B SECRET_STDIN_ONLY_PRODUCTION)", () => {
     expect(result.captured.args[publicUrlIndex + 1]).toBe(publicMcpUrl);
   });
 
-  it("P0-B TEST_ENV_SECRET_FALLBACK_REQUIRES_EXPLICIT_OPT_IN: allowEnvSecretFallback=true + missing C2C_RUNTIME_ALLOW_ENV_SECRET=1 throws", () => {
-    const origGate = process.env.C2C_RUNTIME_ALLOW_ENV_SECRET;
-    delete process.env.C2C_RUNTIME_ALLOW_ENV_SECRET;
+  it("P0-B TEST_ENV_SECRET_FALLBACK_REQUIRES_EXPLICIT_OPT_IN: allowEnvSecretFallback=true + missing MCP_BRIDGE_ALLOW_ENV_SECRET=1 throws", () => {
+    const origGate = process.env.MCP_BRIDGE_ALLOW_ENV_SECRET;
+    delete process.env.MCP_BRIDGE_ALLOW_ENV_SECRET;
     try {
       const spawner = new RuntimeSpawner(makeOpts({ allowEnvSecretFallback: true }));
       expect(() => spawner.spawn(makeCaptureSpawn().spawn)).toThrow(
-        /SECRET_STDIN_ONLY_PRODUCTION|requires C2C_RUNTIME_ALLOW_ENV_SECRET/,
+        /SECRET_STDIN_ONLY_PRODUCTION|requires MCP_BRIDGE_ALLOW_ENV_SECRET/,
       );
     } finally {
-      if (origGate !== undefined) process.env.C2C_RUNTIME_ALLOW_ENV_SECRET = origGate;
+      if (origGate !== undefined) process.env.MCP_BRIDGE_ALLOW_ENV_SECRET = origGate;
     }
   });
 
   it("P0-B fallback works only when both gates open", () => {
-    process.env.C2C_RUNTIME_ALLOW_ENV_SECRET = "1";
+    process.env.MCP_BRIDGE_ALLOW_ENV_SECRET = "1";
     try {
       const cap = makeCaptureSpawn();
       const spawner = new RuntimeSpawner(makeOpts({ allowEnvSecretFallback: true }));
       const result = spawner.spawn(cap.spawn);
-      expect(result.captured.env.C2C_RUNTIME_INSTANCE_SECRET).toBe(SECRET_B64URL);
+      expect(result.captured.env.MCP_BRIDGE_RUNTIME_INSTANCE_SECRET).toBe(SECRET_B64URL);
     } finally {
-      delete process.env.C2C_RUNTIME_ALLOW_ENV_SECRET;
+      delete process.env.MCP_BRIDGE_ALLOW_ENV_SECRET;
     }
   });
 
-  it("P0-B default (no opt-in) NEVER puts secret in env even when C2C_RUNTIME_ALLOW_ENV_SECRET=1", () => {
-    process.env.C2C_RUNTIME_ALLOW_ENV_SECRET = "1";
+  it("P0-B default (no opt-in) NEVER puts secret in env even when MCP_BRIDGE_ALLOW_ENV_SECRET=1", () => {
+    process.env.MCP_BRIDGE_ALLOW_ENV_SECRET = "1";
     try {
       const cap = makeCaptureSpawn();
       const spawner = new RuntimeSpawner(makeOpts()); // no allowEnvSecretFallback
       spawner.spawn(cap.spawn);
-      expect(cap.last?.env.C2C_RUNTIME_INSTANCE_SECRET).toBeUndefined();
+      expect(cap.last?.env.MCP_BRIDGE_RUNTIME_INSTANCE_SECRET).toBeUndefined();
     } finally {
-      delete process.env.C2C_RUNTIME_ALLOW_ENV_SECRET;
+      delete process.env.MCP_BRIDGE_ALLOW_ENV_SECRET;
     }
   });
 });
@@ -148,13 +148,13 @@ describe("RuntimeSpawner Supervisor IPC bridge", () => {
 
     new RuntimeSpawner(makeOpts()).spawn(spawnWithCapture);
     expect(capturedStdio).toEqual(["pipe", "pipe", "pipe"]);
-    expect(capturedEnv?.C2C_RUNTIME_SUPERVISOR_BRIDGE_FD).toBeUndefined();
-    expect(capturedEnv?.C2C_RUNTIME_SUPERVISOR_BRIDGE_DIAGNOSTICS).toBeUndefined();
+    expect(capturedEnv?.MCP_BRIDGE_SUPERVISOR_BRIDGE_FD).toBeUndefined();
+    expect(capturedEnv?.MCP_BRIDGE_SUPERVISOR_BRIDGE_DIAGNOSTICS).toBeUndefined();
 
     new RuntimeSpawner(makeOpts({ enableSupervisorBridge: true })).spawn(spawnWithCapture);
     expect(capturedStdio).toEqual(["pipe", "pipe", "pipe", "ipc"]);
-    expect(capturedEnv?.C2C_RUNTIME_SUPERVISOR_BRIDGE_FD).toBe("3");
-    expect(capturedEnv?.C2C_RUNTIME_SUPERVISOR_BRIDGE_DIAGNOSTICS).toBe("1");
+    expect(capturedEnv?.MCP_BRIDGE_SUPERVISOR_BRIDGE_FD).toBe("3");
+    expect(capturedEnv?.MCP_BRIDGE_SUPERVISOR_BRIDGE_DIAGNOSTICS).toBe("1");
   });
 });
 

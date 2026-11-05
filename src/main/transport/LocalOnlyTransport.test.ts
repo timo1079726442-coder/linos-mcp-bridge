@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { LocalOnlyTransport } from "./LocalOnlyTransport.js";
 
-describe("LocalOnlyTransport (FOUNDER OPTION_A_PLUS §2)", () => {
+describe("LocalOnlyTransport (ADR-0002 §2)", () => {
   it("id is local-only", () => {
     const t = new LocalOnlyTransport();
     expect(t.id).toBe("local-only");

@@ -1,7 +1,7 @@
 /**
  * V2 Supervisor — independent per-user background process.
  *
- * Per ADR-V2-003 Option B + ADR-V2-002 + FOUNDER OPTION_A_PLUS:
+ * Per ADR-V2-003 Option B + ADR-V2-002 + ADR-0002:
  *   - Runs as detached background process; survives UI exit
  *   - Spawns and supervises Runtime child process on V2_LOCAL_PORT=48766
  *   - LOCAL_ONLY transport (no Cloudflare, no DNS, no public hostname)
@@ -11,7 +11,7 @@
  *   - AuditChain for all decisions
  *   - ConnectionIntentStore with real CSPRNG
  *
- * V2_DEFAULT_ISOLATION = TRUE: never bind 48765 or mcp-legacy.example.com
+ * Isolation rule: a new profile never binds the reserved port or the reserved hostname.
  */
 import * as net from "node:net";
 import * as path from "node:path";
@@ -25,7 +25,7 @@ import { RecoveryEngine } from "../main/recovery/RecoveryEngine.js";
 import { ReadinessEngine } from "../main/health/ReadinessEngine.js";
 import { HealthProbe } from "../main/health/HealthProbe.js";
 import { SupervisorProcess } from "../main/process/SupervisorProcess.js";
-import type { CodexExecutionCompletionEvent } from "../main/process/SupervisorProcess.js";
+import type { AgentExecutionCompletionEvent } from "../main/process/SupervisorProcess.js";
 import { SupervisorInstanceLock } from "../main/process/SupervisorInstanceLock.js";
 import { RecoveryCoordinator } from "../main/recovery/RecoveryCoordinator.js";
 import { SecretGenerator } from "../main/security/SecretGenerator.js";
@@ -114,7 +114,7 @@ export const V2_ISOLATION = {
   V2_LOCAL_PORT: 48766,
   V2_DEFAULT_TRANSPORT: "LOCAL_ONLY",
   V2_PUBLIC_HOSTNAME_DEFAULT: "DISABLED",
-  COMPANY_PRODUCTION_PROTECTED: true,
+  LEGACY_INSTANCE_PROTECTED: true,
   AUTO_PRODUCTION_TAKEOVER: false,
   LEGACY_MIGRATION_MODE_DEFAULT: false,
   RUNTIME_PROCESS_EXEC_PATH_DEFAULT_REMOVED: true,
@@ -188,13 +188,13 @@ function enforceIsolation(config: {
     throw new Error(`V2_ISOLATION: ${runtimePortError(config.expectedLocalPort)}`);
   }
   if (config.publicMcpUrl?.toLowerCase().includes("mcp-legacy.example.com")) {
-    throw new Error("V2_ISOLATION: refusing to bind Legacy Production hostname");
+    throw new Error("V2_ISOLATION: refusing to bind reserved hostname");
   }
   if (config.hostname?.toLowerCase().includes("mcp-legacy.example.com")) {
-    throw new Error("V2_ISOLATION: refusing Legacy Production hostname identity");
+    throw new Error("V2_ISOLATION: refusing reserved hostname identity");
   }
   if (config.tunnelName?.toLowerCase().includes("mcpbridge-tunnel")) {
-    throw new Error("V2_ISOLATION: refusing to use Legacy Production tunnel");
+    throw new Error("V2_ISOLATION: refusing to use reserved tunnel");
   }
 }
 
@@ -250,7 +250,7 @@ async function main(): Promise<void> {
       pipe: PIPE_NAME,
       pid: process.pid,
       isolation: V2_ISOLATION,
-      foonote: "FOUNDER OPTION_A_PLUS: V2 isolated from Legacy Production",
+      foonote: "ADR-0002: isolated profile must not bind reserved port",
     }),
   );
 
@@ -719,10 +719,10 @@ async function main(): Promise<void> {
           result = await intentStore.listActive();
           break;
         case "execution.record": {
-          const event = (req.params ?? {}) as CodexExecutionCompletionEvent;
+          const event = (req.params ?? {}) as AgentExecutionCompletionEvent;
           const recorded = await supervisor.recordExecutionCompletion(event);
           await audit.append({
-            event: "CODEX_EXECUTION_RECORDED",
+            event: "AGENT_EXECUTION_RECORDED",
             taskId: event.taskId,
             iteration: event.iteration,
             status: event.status,
@@ -792,7 +792,7 @@ async function main(): Promise<void> {
           break;
         case "profile.port.update": {
           // 更换本机端口：校验 → 查占用 → 停旧 Runtime → 写配置 → 新端口起 Runtime。
-          // 48766 现已允许（Legacy MCP 停用），仅 48765 保留端口永久禁止。
+          // 48766 现已允许（Legacy MCP 停用），保留端口不可绑定。
           const nextPort = Number((req.params as { port?: number } | undefined)?.port);
           if (!isValidRuntimePort(nextPort)) throw new Error(`RUNTIME_PORT_INVALID:${String(nextPort)}`);
           if (nextPort === active.transport.expectedLocalPort) {
@@ -831,7 +831,7 @@ async function main(): Promise<void> {
           break;
         }
         case "runtime.restart": {
-          // 重启我们自己的 V2 Runtime（不触碰 Legacy 生产服务 48765）。
+          // 重启本 Runtime（不触碰保留端口）。
           // 每次重启前同步一次 transport 标识，确保 OAuth issuer 与当前公网地址一致。
           activeSupervisor?.applyTransportIdentity(active.transport.publicMcpUrl, active.transport.expectedLocalPort);
           const before = supervisor.getState();

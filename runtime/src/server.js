@@ -16,7 +16,7 @@ export async function startServer(opts) {
     // ----- Health (public; minimal identity) -----
     app.get("/health", (_req, res) => {
         res.json({
-            service: "c2c-bridge",
+            service: "mcp-bridge",
             version: "2.0.0",
             status: "ok",
             healthFingerprint: healthFp,
@@ -119,7 +119,7 @@ export async function startServer(opts) {
     // ----- /admin/info (loopback + Capability MAC) -----
     app.get("/admin/info", adminGuard, (_req, res) => {
         res.json({
-            service: "c2c-bridge",
+            service: "mcp-bridge",
             version: "2.0.0",
             deviceId: opts.identity.deviceId,
             profileId: opts.identity.profileId,

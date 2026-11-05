@@ -18,7 +18,7 @@ export interface RuntimeReadyObservation {
   workspaceId: string;
 }
 
-export interface CodexTaskCompletionEvent {
+export interface AgentTaskCompletionEvent {
   taskId: string;
   iteration: number;
   status: ExecutionStatus;
@@ -95,7 +95,7 @@ export class ExecutionStoreProducer {
     });
   }
 
-  async publishCodexTaskCompleted(event: CodexTaskCompletionEvent): Promise<ExecutionRecord> {
+  async publishAgentTaskCompleted(event: AgentTaskCompletionEvent): Promise<ExecutionRecord> {
     validateCompletion(event);
     const id = `exec_codex_${createHash("sha256")
       .update(`${event.taskId}\u0000${event.iteration}`, "utf8")
@@ -116,7 +116,7 @@ export class ExecutionStoreProducer {
   }
 }
 
-function validateCompletion(event: CodexTaskCompletionEvent): void {
+function validateCompletion(event: AgentTaskCompletionEvent): void {
   if (!/^[A-Za-z0-9._:-]{1,200}$/.test(event.taskId)) throw new Error("execution_task_id_invalid");
   if (!Number.isInteger(event.iteration) || event.iteration < 1 || event.iteration > 1_000_000) throw new Error("execution_iteration_invalid");
   if (event.status !== "PASS" && event.status !== "FAIL" && event.status !== "UNKNOWN") throw new Error("execution_status_invalid");

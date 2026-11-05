@@ -53,7 +53,7 @@ export type StopProof =
   | { kind: "PROVEN_RUNTIME_VERIFIED"; pid: number }
   | { kind: "REFUSED"; reason: string };
 
-export interface CodexExecutionCompletionEvent {
+export interface AgentExecutionCompletionEvent {
   taskId: string;
   iteration: number;
   status: "PASS" | "FAIL" | "UNKNOWN";
@@ -326,15 +326,15 @@ export class SupervisorProcess extends EventEmitter {
   }
 
   /**
-   * Forward a bounded, already-redacted Codex/Harness completion event to the
+   * Forward a bounded, already-redacted agent completion event to the
    * Runtime-owned Execution Store. Raw stdout, stderr, diffs and credentials
    * never enter this method or the IPC payload.
    */
-  async recordExecutionCompletion(event: CodexExecutionCompletionEvent): Promise<{
+  async recordExecutionCompletion(event: AgentExecutionCompletionEvent): Promise<{
     id: string;
     taskId: string;
     iteration: number;
-    status: CodexExecutionCompletionEvent["status"];
+    status: AgentExecutionCompletionEvent["status"];
   }> {
     validateExecutionCompletionEvent(event);
     const body = JSON.stringify({
@@ -448,7 +448,7 @@ export class SupervisorProcess extends EventEmitter {
   private async persistObservation(): Promise<void> {
     if (!this.state.pid || !this.state.runtimeInstanceId) return;
     const observation = {
-      service: "c2c-bridge",
+      service: "mcp-bridge",
       version: "2.0.0",
       pid: this.state.pid,
       port: this.state.port,
@@ -481,7 +481,7 @@ async function computeWorkspaceId(root: string): Promise<WorkspaceId> {
   return createHash("sha256").update(normalized).digest("hex").slice(0, 12);
 }
 
-function validateExecutionCompletionEvent(event: CodexExecutionCompletionEvent): void {
+function validateExecutionCompletionEvent(event: AgentExecutionCompletionEvent): void {
   if (!/^[A-Za-z0-9._:-]{1,200}$/.test(event.taskId)) throw new Error("execution_task_id_invalid");
   if (!Number.isInteger(event.iteration) || event.iteration < 1 || event.iteration > 1_000_000) {
     throw new Error("execution_iteration_invalid");
