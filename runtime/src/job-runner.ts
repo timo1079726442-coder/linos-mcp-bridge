@@ -291,6 +291,8 @@ async function runJob(
       env: commandSpawnEnv(),
     });
     controller.child = child;
+    // 关键：spawn 后立刻注册退出监听，避免短命进程在 await store.save() 期间退出而丢事件。
+    const exitPromise = waitForExit(child);
     const pid = child.pid ?? null;
     record = await store.save({ ...record, pid, durationMs: 0 });
     if (controller.cancelRequested) {
@@ -348,7 +350,7 @@ async function runJob(
     })();
     try {
       const outcome = await Promise.race([
-        withTimeout(waitForExit(child), record.spec.timeoutMs + 15_000).then((code) => ({ kind: "exit" as const, code })),
+        withTimeout(exitPromise, record.spec.timeoutMs + 15_000).then((code) => ({ kind: "exit" as const, code })),
         cancelWatcher.then((kind) => ({ kind, code: null as number | null })),
       ]);
       finished = true;
