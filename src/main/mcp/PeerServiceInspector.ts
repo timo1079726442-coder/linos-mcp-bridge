@@ -245,7 +245,7 @@ export async function inspectPeerService(port = 48766): Promise<PeerInspection> 
   // ---------- 2. 配置文件（只读） ----------
   // 重要：config.json / session.json 属于「Legacy MCP」这一个服务。
   // 只有当目标端口确实回应了它的 /tools（即确认就是它）时才套用这些配置，
-  // 否则会把 48766 的配置错安到 48765（Legacy 桥）身上。
+  // 否则会把一个服务的配置错安到另一个进程身上。
   const ownsPeerConfig = toolsRes?.ok === true;
   const { value: cfg } = ownsPeerConfig
     ? await readFirstJson<RawConfig>(["config.json"])

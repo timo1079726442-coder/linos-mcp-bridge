@@ -11,7 +11,7 @@
  *   - AuditChain for all decisions
  *   - ConnectionIntentStore with real CSPRNG
  *
- * V2_DEFAULT_ISOLATION = TRUE: never bind 48765 or mcp-legacy.example.com
+ * Isolation rule: a profile must not bind the reserved port or reserved hostname.
  */
 import * as net from "node:net";
 import * as path from "node:path";
@@ -792,7 +792,7 @@ async function main(): Promise<void> {
           break;
         case "profile.port.update": {
           // 更换本机端口：校验 → 查占用 → 停旧 Runtime → 写配置 → 新端口起 Runtime。
-          // 48766 现已允许（Legacy MCP 停用），仅 48765 保留端口永久禁止。
+          // 端口策略：只按真实占用判断，不再保留任何内部端口。
           const nextPort = Number((req.params as { port?: number } | undefined)?.port);
           if (!isValidRuntimePort(nextPort)) throw new Error(`RUNTIME_PORT_INVALID:${String(nextPort)}`);
           if (nextPort === active.transport.expectedLocalPort) {
@@ -831,7 +831,7 @@ async function main(): Promise<void> {
           break;
         }
         case "runtime.restart": {
-          // 重启我们自己的 V2 Runtime（不触碰 Legacy 生产服务 48765）。
+          // 重启本 Runtime（不触碰其它进程与服务）。
           // 每次重启前同步一次 transport 标识，确保 OAuth issuer 与当前公网地址一致。
           activeSupervisor?.applyTransportIdentity(active.transport.publicMcpUrl, active.transport.expectedLocalPort);
           const before = supervisor.getState();

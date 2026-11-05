@@ -179,7 +179,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       const remote = patch.provider === "CLOUDFLARE_NAMED";
       const detail = [
         `Profile: ${active.profileName} (${active.profileId})`,
-        `本地端口: ${active.transport.expectedLocalPort}（固定，不允许改为生产 48765）`,
+        `本地端口: ${active.transport.expectedLocalPort}（固定端口，可改配置）`,
         `Transport: ${patch.provider}`,
         ...(remote ? [
           `Hostname: ${patch.hostname ?? "未填写"}`,
@@ -188,7 +188,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
           `Credential: ${patch.credentialPath ? "已指定本机凭证文件" : active.transport.credentialPath ? "沿用当前 Profile 凭证" : "未配置"}`,
         ] : ["远程 Tunnel 配置将被清空，Profile 返回 LOCAL_ONLY。"]),
         "",
-        "保存前 Supervisor 会再次执行 V2 隔离校验。生产 48765、mcp-legacy.example.com 和生产 Tunnel 始终禁止绑定。",
+        "保存前 Supervisor 会再次执行 V2 隔离校验。保留端口/占位域名不会自动接管，绑定前按真实占用校验。",
         "若配置发生变化，旧的本 Profile Transport 会先安全停止；新配置需重启 Supervisor 后生效。",
       ].join("\n");
       const confirmed = await dialog.showMessageBox(win, {
@@ -355,7 +355,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     },
   );
 
-  // ===== 我们自己的服务：重启 Runtime / 重启隧道（绝不触碰 legacy 48765）=====
+  // ===== 本服务：重启 Runtime / 重启隧道（不触碰其它进程）=====
   ipcMain.handle("service:runtime:restart", async (_event, capability: IpcCapability) => {
     requireCap(capability, "service:runtime:restart");
     return ctx.supervisor.restartRuntime();
