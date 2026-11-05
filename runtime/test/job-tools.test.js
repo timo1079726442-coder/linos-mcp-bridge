@@ -1,13 +1,28 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { McpSecurityBoundary } from "../dist/security-boundary.js";
 import { JobStore } from "../dist/job-store.js";
 import { startJobTool, jobListTool, jobStatusTool, jobOutputTool, jobCancelTool, jobResumeTool } from "../dist/job-tools.js";
+import { createMemoryTimeline } from "../dist/job-timeline.js";
 
 const WORKSPACE_ID = "ws_job_test";
+
+// 诊断：仅在设置 MCP_TIMELINE_DIR 时收集（CI/人工压测），正常开发不留痕迹。
+const TIMELINE_DIR = process.env.MCP_TIMELINE_DIR ?? "";
+const timelines = [];
+if (TIMELINE_DIR) {
+  process.on("exit", () => {
+    try {
+      mkdirSync(TIMELINE_DIR, { recursive: true });
+      const file = path.join(TIMELINE_DIR, `job-tools-${process.pid}.jsonl`);
+      writeFileSync(file, timelines.map((t) => t.toJsonl()).join(""), "utf8");
+    } catch { /* 诊断失败不影响测试结果 */ }
+  });
+}
 const CLIENT = "client-job-test";
 
 async function setup() {
@@ -37,6 +52,8 @@ async function setup() {
     workspaceId: WORKSPACE_ID,
     profileDir: profile,
   });
+  const timeline = TIMELINE_DIR ? createMemoryTimeline() : null;
+  if (timeline) timelines.push(timeline);
   const ws = (shellScopeGranted) => ({
     boundary,
     workspaceId: WORKSPACE_ID,
@@ -44,6 +61,7 @@ async function setup() {
     profileDir: profile,
     caller: { clientId: CLIENT, requestId: "job-test-1" },
     shellScopeGranted,
+    ...(timeline ? { timeline: timeline.sink } : {}),
   });
   return { parent, profile, ws };
 }
