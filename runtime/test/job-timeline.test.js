@@ -67,6 +67,45 @@ function dump(timeline, label) {
   console.log(lines.join("\n"));
 }
 
+function assertAttemptSettledAfterIo(timeline, { requireCancel = false } = {}) {
+  const groups = timeline.byAttempt();
+  assert.ok(groups.size > 0, "timeline must contain at least one attempt");
+  let sawCancel = false;
+  for (const [key, events] of groups) {
+    const names = events.map((event) => event.event);
+    const settledAt = names.lastIndexOf("CONTROLLER_SETTLED");
+    assert.notEqual(settledAt, -1, `${key} must settle`);
+    const terminalAt = names.indexOf("TERMINAL_PERSISTED");
+    const cancelAt = names.indexOf("CANCEL_PERSISTED");
+    const signalAt = names.indexOf("CANCEL_SIGNAL_SENT");
+    const exitAt = names.indexOf("PROCESS_EXITED");
+    const drainedAt = names.indexOf("OUTPUT_DRAINED");
+    if (terminalAt !== -1) assert.ok(terminalAt < settledAt, `${key}: terminal must persist before settle`);
+    if (cancelAt !== -1) {
+      sawCancel = true;
+      assert.ok(cancelAt < signalAt, `${key}: cancellation must persist before termination is requested`);
+      assert.ok(signalAt < exitAt, `${key}: termination request must precede child close`);
+      assert.ok(exitAt < drainedAt, `${key}: real process close must precede output drain`);
+      assert.ok(drainedAt < settledAt, `${key}: output drain must precede settle`);
+    }
+    let openSaves = 0;
+    let maxOpenSaves = 0;
+    for (const event of events.slice(0, settledAt + 1)) {
+      if (event.event === "STORE_SAVE_BEGIN") {
+        openSaves += 1;
+        maxOpenSaves = Math.max(maxOpenSaves, openSaves);
+      } else if (event.event === "STORE_SAVE_END" || event.event === "STORE_SAVE_ERROR") {
+        openSaves -= 1;
+      }
+    }
+    assert.equal(openSaves, 0, `${key}: all saves must finish before settle`);
+    assert.equal(maxOpenSaves, 1, `${key}: same-job store saves must be serialized`);
+    assert.equal(events.slice(settledAt + 1).some((event) => event.event.startsWith("STORE_")), false,
+      `${key}: no store writes may occur after settle`);
+  }
+  if (requireCancel) assert.equal(sawCancel, true, "cancel timeline must include a persisted cancellation");
+}
+
 async function waitTerminal(ws, id, timeoutMs = 20_000) {
   const startedAt = Date.now();
   let status = null;
@@ -92,6 +131,7 @@ test("并发两个任务的时间线", async () => {
     const finals = [];
     for (const item of started) finals.push(await waitTerminal(w, item.job_id));
     dump(timeline, "并发两个任务");
+    assertAttemptSettledAfterIo(timeline);
     assert.equal(finals.length, 2);
   } finally {
     await rm(parent, { recursive: true, force: true });
@@ -119,6 +159,7 @@ test("启动后取消的时间线", async () => {
     await jobCancelTool(w, { job_id: started.job_id });
     await waitTerminal(w, started.job_id);
     dump(timeline, "启动后取消");
+    assertAttemptSettledAfterIo(timeline, { requireCancel: true });
   } finally {
     await rm(parent, { recursive: true, force: true });
   }

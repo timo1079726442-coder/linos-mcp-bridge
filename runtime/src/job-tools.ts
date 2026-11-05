@@ -299,7 +299,7 @@ export async function jobCancelTool(ws: JobWorkspace, args: Record<string, unkno
     throw new Error("JOB_NOT_RUNNING");
   }
   const { cancelActiveJob } = await import("./job-runner.js");
-  await cancelActiveJob(store, id);
+  await cancelActiveJob(store, id, timelineOf(ws));
   const updated = await waitForTerminal(store, id, 15000);
   return { job_id: updated.id, state: updated.state, cancel_requested: updated.cancelRequested };
 }

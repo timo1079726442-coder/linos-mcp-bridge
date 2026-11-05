@@ -5,6 +5,7 @@ import { assertAllowedCommand, commandSpawnEnv, tokenizeCommand } from "./comman
 import { McpSecurityBoundary } from "./security-boundary.js";
 import { gitCommit } from "./command-tools.js";
 import { JobStore, type JobRecord } from "./job-store.js";
+import type { TimelineSink } from "./job-timeline.js";
 
 export interface ActiveJobController {
   child: ChildProcess | null;
@@ -78,7 +79,7 @@ export interface LaunchOptions {
   profileDir: string;
   workspaceId: string;
   /** 诊断用；只有测试会传，生产入口不传也不会写文件。 */
-  timeline?: (event: import("./job-timeline.js").TimelineEvent) => void;
+  timeline?: TimelineSink;
 }
 
 /**
@@ -139,10 +140,14 @@ export async function recoverInterruptedJobs(store: JobStore, now = Date.now(), 
   return marked;
 }
 
-export async function cancelActiveJob(store: JobStore, id: string): Promise<JobRecord> {
+export async function cancelActiveJob(store: JobStore, id: string, timeline?: TimelineSink): Promise<JobRecord> {
   const controller = activeJobs.get(id);
   const record = await store.get(id);
   if (!controller || (record.state !== "RUNNING" && record.state !== "QUEUED")) throw new Error("JOB_NOT_RUNNING");
+  const emit = timeline ?? (() => undefined);
+  const pid = controller.child?.pid ?? record.pid ?? null;
+  store.noteAttempt(id, controller.attemptId);
+  emit({ job_id: id, attempt_id: controller.attemptId, event: "CANCEL_REQUESTED", pid });
   // 先把"取消"写进记录并落成终态：进程被 kill 后退出码非 0，若等 runner 回写会把 CANCELLED 覆盖成 FAILED。
   const next: JobRecord = {
     ...record,
@@ -153,11 +158,12 @@ export async function cancelActiveJob(store: JobStore, id: string): Promise<JobR
     durationMs: Math.max(0, Date.now() - Date.parse(record.startedAt ?? record.createdAt)),
   };
   await store.save(next);
+  emit({ job_id: id, attempt_id: controller.attemptId, event: "CANCEL_PERSISTED", pid });
   controller.cancelRequested = true;
   const child = controller.child;
-  const pid = next.pid ?? undefined;
   if (child && !child.killed) {
-    await terminateChild(child, pid);
+    emit({ job_id: id, attempt_id: controller.attemptId, event: "CANCEL_SIGNAL_SENT", pid });
+    await terminateChild(child, pid ?? undefined);
   }
   return store.get(id);
 }
@@ -170,6 +176,7 @@ export async function launchJob(
   // 旧 attempt 可能"终态已写、控制器尚未清理"：不能静默返回，必须等它真正结束后再决定。
   const attemptId = `attempt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const emit = options.timeline ?? (() => undefined);
+  emit({ job_id: record.id, attempt_id: attemptId, event: "LAUNCH_RESERVED", pid: null });
   const existing = activeJobs.get(record.id);
   if (existing) {
     await Promise.race([existing.settled, new Promise<void>((resolve) => setTimeout(resolve, 10_000))]);
@@ -261,6 +268,9 @@ async function runJob(
     })();
   }, 5000);
   let child: ChildProcess | null = null;
+  let exitPromise: Promise<number | null> | null = null;
+  let drainOutput: (() => Promise<void>) | null = null;
+  let exitObserved = false;
   try {
     const boundary = await McpSecurityBoundary.create(options.workspaceRoot, {
       aclPath: options.profileDir ? path.join(options.profileDir, "folder-acl.json") : null,
@@ -303,7 +313,7 @@ async function runJob(
     });
     controller.child = child;
     // 关键：spawn 后立刻注册退出监听，避免短命进程在 await store.save() 期间退出而丢事件。
-    const exitPromise = waitForExit(child);
+    exitPromise = waitForExit(child);
     emitRun({ job_id: id, attempt_id: attemptId, event: "WAIT_EXIT_ATTACHED", pid: child.pid ?? null });
     const pid = child.pid ?? null;
     record = await store.save({ ...record, pid, durationMs: 0 });
@@ -337,8 +347,20 @@ async function runJob(
       carry += text;
       await flushLines(false);
     };
-    child.stdout?.on("data", (chunk: Buffer) => void append(chunk, "out"));
-    child.stderr?.on("data", (chunk: Buffer) => void append(chunk, "err"));
+    let outputQueue: Promise<void> = Promise.resolve();
+    let outputDrained = false;
+    const queueAppend = (chunk: Buffer, stream: "out" | "err"): void => {
+      outputQueue = outputQueue.then(() => append(chunk, stream)).catch(() => undefined);
+    };
+    drainOutput = async () => {
+      if (outputDrained) return;
+      await outputQueue;
+      await flushLines(true);
+      outputDrained = true;
+      emitRun({ job_id: id, attempt_id: attemptId, event: "OUTPUT_DRAINED" });
+    };
+    child.stdout?.on("data", (chunk: Buffer) => queueAppend(chunk, "out"));
+    child.stderr?.on("data", (chunk: Buffer) => queueAppend(chunk, "err"));
     let exitCode: number | null = null;
     let finished = false;
     const cancelWatcher = (async (): Promise<"cancelled" | "changed"> => {
@@ -362,29 +384,47 @@ async function runJob(
     })();
     try {
       const outcome = await Promise.race([
-        withTimeout(exitPromise, record.spec.timeoutMs + 15_000).then((code) => ({ kind: "exit" as const, code })),
+        withTimeout(exitPromise!, record.spec.timeoutMs + 15_000).then((code) => ({ kind: "exit" as const, code })),
         cancelWatcher.then((kind) => ({ kind, code: null as number | null })),
       ]);
       finished = true;
-      exitCode = outcome.kind === "exit" ? outcome.code : null;
+      if (outcome.kind === "exit") {
+        exitCode = outcome.code;
+      } else {
+        // A terminal store update may win the race before the child emits `close`.
+        // Do not claim PROCESS_EXITED or settle the controller until close is observed.
+        try {
+          exitCode = await withTimeout(exitPromise!, 15_000);
+        } catch {
+          await terminateChild(child, pid ?? undefined);
+          exitCode = await withTimeout(exitPromise!, 15_000);
+        }
+      }
+      exitObserved = true;
       emitRun({ job_id: id, attempt_id: attemptId, event: "PROCESS_EXITED", pid: controller.child?.pid ?? null, exit_code: exitCode });
+      await drainOutput?.();
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg === "JOB_JOIN_TIMEOUT") {
-        await terminateChild(child, pid ?? undefined);
+        await terminateChild(child!, pid ?? undefined);
+        try {
+          exitCode = await withTimeout(exitPromise!, 15_000);
+          exitObserved = true;
+          emitRun({ job_id: id, attempt_id: attemptId, event: "PROCESS_EXITED", pid: controller.child?.pid ?? null, exit_code: exitCode });
+        } catch {
+          /* retain the original join timeout; controller cleanup still drains known output writes */
+        }
       }
       await store.save({ ...(await store.get(id)), errorCode: "JOB_JOIN_TIMEOUT", errorMessage: "worker join timeout" });
       throw error;
     } finally {
       finished = true;
       clearTimeout(timeout);
-      // 进程结束后把残行连同换行一起写出去，避免最后一行粘连或丢换行。
-      await flushLines(true);
+      await drainOutput?.();
     }
     const latest = await store.get(id);
     // 取消是终态：runner 不得用退出码把它改写成 FAILED。
     if (latest.state === "CANCELLED") {
-      await flushLines(true);
       return;
     }
     const durationMs = Date.now() - startedWall;

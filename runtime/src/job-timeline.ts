@@ -12,6 +12,10 @@ type Base = { job_id: string; attempt_id: string };
 export type TimelineEvent =
   | (Base & { event: "LAUNCH_RESERVED"; pid?: null })
   | (Base & { event: "LAUNCH_REJECTED" })
+  | (Base & { event: "CANCEL_REQUESTED"; pid: number | null })
+  | (Base & { event: "CANCEL_PERSISTED"; pid: number | null })
+  | (Base & { event: "CANCEL_SIGNAL_SENT"; pid: number | null })
+  | (Base & { event: "OUTPUT_DRAINED" })
   | (Base & { event: "WAIT_EXIT_ATTACHED"; pid: number | null })
   | (Base & { event: "PROCESS_EXITED"; pid: number | null; exit_code: number | null })
   | (Base & { event: "STORE_SAVE_BEGIN" })

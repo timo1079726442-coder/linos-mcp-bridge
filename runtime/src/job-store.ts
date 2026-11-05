@@ -112,6 +112,22 @@ const MAX_LOG_BYTES = 2 * 1024 * 1024;
 const LOG_TAIL_BYTES = 2 * 1024 * 1024;
 const MAX_JOB_FILES_SCANNED = 500;
 const WORKSPACE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const saveTails = new Map<string, Promise<void>>();
+
+async function withJobSaveLock<T>(key: string, action: () => Promise<T>): Promise<T> {
+  const previous = saveTails.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  const tail = previous.then(() => current, () => current);
+  saveTails.set(key, tail);
+  await previous.catch(() => undefined);
+  try {
+    return await action();
+  } finally {
+    release();
+    if (saveTails.get(key) === tail) saveTails.delete(key);
+  }
+}
 
 function isRecord(value: unknown): value is JobRecord {
   if (!value || typeof value !== "object") return false;
@@ -252,30 +268,33 @@ export class JobStore {
   }
 
   async save(record: JobRecord): Promise<JobRecord> {
-    const attemptId = this.attemptIds.get(record.id) ?? String(record.attempts);
-    const base = { job_id: record.id, attempt_id: attemptId };
-    this.timeline?.({ ...base, event: "STORE_SAVE_BEGIN" });
-    try {
-      // 取消是终态：并发写入时（runner 回写 vs cancel 落盘）不允许被覆盖回 RUNNING/FAILED。
-      this.timeline?.({ ...base, event: "STORE_READ_BEGIN" });
-      const existing = await this.get(record.id).catch(() => {
-        this.timeline?.({ ...base, event: "STORE_READ_ERROR" });
-        return null;
-      });
-      this.timeline?.({ ...base, event: "STORE_READ_END" });
-      const effective = existing?.state === "CANCELLED" && record.state !== "CANCELLED"
-        ? { ...record, state: "CANCELLED" as const, cancelRequested: true }
-        : record;
-      const next: JobRecord = { ...effective, updatedAt: new Date().toISOString() };
-      this.timeline?.({ ...base, event: "STORE_ATOMIC_WRITE_BEGIN" });
-      await writeAtomicJson(jobFile(this.requireDir(), record.id), next);
-      this.timeline?.({ ...base, event: "STORE_ATOMIC_WRITE_END" });
-      this.timeline?.({ ...base, event: "STORE_SAVE_END" });
-      return next;
-    } catch (error) {
-      this.timeline?.({ ...base, event: "STORE_SAVE_ERROR" });
-      throw error;
-    }
+    const file = jobFile(this.requireDir(), record.id);
+    return withJobSaveLock(file, async () => {
+      const attemptId = this.attemptIds.get(record.id) ?? String(record.attempts);
+      const base = { job_id: record.id, attempt_id: attemptId };
+      this.timeline?.({ ...base, event: "STORE_SAVE_BEGIN" });
+      try {
+        // 取消是终态：同一 job 的 runner、取消工具与输出更新共享串行写锁。
+        this.timeline?.({ ...base, event: "STORE_READ_BEGIN" });
+        const existing = await this.get(record.id).catch(() => {
+          this.timeline?.({ ...base, event: "STORE_READ_ERROR" });
+          return null;
+        });
+        this.timeline?.({ ...base, event: "STORE_READ_END" });
+        const effective = existing?.state === "CANCELLED" && record.state !== "CANCELLED"
+          ? { ...record, state: "CANCELLED" as const, cancelRequested: true }
+          : record;
+        const next: JobRecord = { ...effective, updatedAt: new Date().toISOString() };
+        this.timeline?.({ ...base, event: "STORE_ATOMIC_WRITE_BEGIN" });
+        await writeAtomicJson(file, next);
+        this.timeline?.({ ...base, event: "STORE_ATOMIC_WRITE_END" });
+        this.timeline?.({ ...base, event: "STORE_SAVE_END" });
+        return next;
+      } catch (error) {
+        this.timeline?.({ ...base, event: "STORE_SAVE_ERROR" });
+        throw error;
+      }
+    });
   }
 
   async findActiveByIdempotencyKey(input: { clientId: string; idempotencyKey: string }): Promise<JobRecord | null> {
