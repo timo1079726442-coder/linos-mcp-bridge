@@ -32,9 +32,9 @@ test("tool audit appends a verifiable hash chain without file contents", async (
     const lines = raw.trim().split(/\r?\n/).map((line) => JSON.parse(line));
     assert.equal(lines.length, 3);
     assert.equal(lines[0].tool, "write_file");
-    assert.equal(lines[0].ok, true);
     assert.equal(lines[0].prevHash, "0".repeat(64));
     assert.equal(lines[1].prevHash, lines[0].hash);
+    assert.equal(lines[1].ok, true);
     assert.equal(lines[2].ok, false);
     assert.equal(lines[2].errorCode, "INSUFFICIENT_SCOPE");
     assert.equal(raw.includes("TOP-SECRET-CONTENT"), false);

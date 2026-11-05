@@ -1,16 +1,18 @@
+import { redactString } from "./redaction.js";
 /**
  * 工具调用哈希链审计。
  *
- * 与 48765 的 workspace-write-audit.jsonl 对齐：
+ * 设计要点：
  * - 每条记录包含 prevHash + hash，任何一条被改都会断链；
  * - 只记录工具名、路径/命令、结果与哈希，不记录文件正文；
- * - 追加失败不阻断业务，但会写到 stderr，便于诊断。
+ * - 命令与错误码先脱敏再截断，避免把令牌写进审计；\n * - 追加失败会抛给调用方：写入/命令类操作应据此 fail-closed。
  */
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 
 export interface ToolAuditInput {
+
   tool: string;
   ok: boolean;
   durationMs: number;
@@ -73,13 +75,14 @@ export async function appendToolAudit(profileDir: string, input: ToolAuditInput)
       prevHash: tail.hash,
       ...input,
     };
-    if (entry.command) entry.command = entry.command.slice(0, 200);
+    // 先脱敏再截断：命令参数里可能带 token，脱敏必须在落盘前。
+    if (entry.command) entry.command = redactString(entry.command).slice(0, 200);
+    if (typeof entry.errorCode === "string") entry.errorCode = redactString(entry.errorCode).slice(0, 120);
     const hash = digest(tail.hash, entry);
     await fs.appendFile(file, `${JSON.stringify({ ...entry, hash })}\n`, "utf8");
-  }).catch((error: unknown) => {
-    console.error(`tool audit append failed: ${error instanceof Error ? error.message : String(error)}`);
   });
-  queues.set(file, next);
+  // 队列不能被一次失败卡死，但调用方必须看到失败（fail-closed 由调用方决定是否阻断）。
+  queues.set(file, next.catch(() => undefined));
   await next;
 }
 
