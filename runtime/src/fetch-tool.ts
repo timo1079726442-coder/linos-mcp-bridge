@@ -1,3 +1,4 @@
+import dns from "node:dns/promises";
 /**
  * fetch — 受白名单约束的只读网络读取。
  *
@@ -112,6 +113,35 @@ export function domainAllowed(hostname: string, domains: string[]): boolean {
   return false;
 }
 
+/** DNS 解析后再校验：防止"合法域名解析到内网地址"的 SSRF（DNS rebinding）。 */
+async function assertPublicResolution(hostname: string): Promise<void> {
+  if (isIpLiteral(hostname)) throw new FetchError("FETCH_HOST_NOT_ALLOWED");
+  let addresses: Array<{ address: string; family: number }>;
+  try {
+    addresses = await dns.lookup(hostname, { all: true });
+  } catch {
+    throw new FetchError("FETCH_DNS_FAILED");
+  }
+  for (const entry of addresses) {
+    if (isPrivateAddress(entry.address)) throw new FetchError("FETCH_HOST_NOT_ALLOWED");
+  }
+}
+
+function isPrivateAddress(address: string): boolean {
+  const value = address.toLowerCase();
+  if (value === "::1" || value === "0.0.0.0" || value === "::") return true;
+  if (value.startsWith("fe80:") || value.startsWith("fc") || value.startsWith("fd")) return true;
+  if (value.startsWith("::ffff:")) return isPrivateAddress(value.slice(7));
+  const parts = value.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  const [a, b] = parts as [number, number, number, number];
+  if (a === 10 || a === 127 || a === 0) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  return false;
+}
 function validateUrl(input: unknown, allowlist: FetchAllowlist): URL {
   if (typeof input !== "string" || !input.trim() || input.length > MAX_URL_LENGTH) {
     throw new FetchError("FETCH_URL_INVALID");
@@ -155,6 +185,8 @@ export async function fetchUrl(
     : MAX_BYTES;
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
+    // 每次（含重定向后的目标）都做解析后校验，防止 DNS rebinding 指向内网。
+    if (request === fetch) await assertPublicResolution(current.hostname);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     let response: Response;
