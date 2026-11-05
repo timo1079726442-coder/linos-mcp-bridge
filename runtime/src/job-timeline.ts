@@ -1,44 +1,57 @@
 /**
  * 任务生命周期时间线（诊断用）。
  *
- * 生产代码只使用 `TimelineSink` 类型（type-only import，编译后不存在）。
- * 真正的写文件实现 `createTimelineSink()` 只在测试里被 import，
- * 因此不会进入生产运行时依赖图，也不会写用户目录。
+ * 设计约束：
+ * - 生产代码只 `import type`（类型被擦除），不进入运行时依赖图；
+ * - 只有测试用 `createMemoryTimeline()`，测试结束后（含失败）再导出 JSONL；
+ * - 不使用同步磁盘写入，避免诊断本身改变被测时序。
  */
-import { appendFileSync, mkdirSync } from "node:fs";
-import path from "node:path";
 
-export interface TimelineEvent {
-  job_id: string;
-  attempt_id: string;
-  event:
-    | "LAUNCH_RESERVED"
-    | "STORE_SAVE_BEGIN"
-    | "STORE_ATOMIC_WRITE_BEGIN"
-    | "STORE_ATOMIC_WRITE_END"
-    | "STORE_SAVE_END"
-    | "STORE_SAVE_ERROR"
-    | "TERMINAL_PERSISTED"
-    | "CONTROLLER_SETTLED"
-    | "LAUNCH_REJECTED"
-    | "STORE_SAVE_BEGIN"
-    | "STORE_SAVE_END"
-    | "WAIT_EXIT_ATTACHED"
-    | "PROCESS_EXITED"
-    | "TERMINAL_PERSISTED"
-    | "CONTROLLER_SETTLED";
-  pid?: number | null;
-  exit_code?: number | null;
-  duration_ms?: number;
-}
+type Base = { job_id: string; attempt_id: string };
+
+export type TimelineEvent =
+  | (Base & { event: "LAUNCH_RESERVED"; pid?: null })
+  | (Base & { event: "LAUNCH_REJECTED" })
+  | (Base & { event: "WAIT_EXIT_ATTACHED"; pid: number | null })
+  | (Base & { event: "PROCESS_EXITED"; pid: number | null; exit_code: number | null })
+  | (Base & { event: "STORE_SAVE_BEGIN" })
+  | (Base & { event: "STORE_READ_BEGIN" })
+  | (Base & { event: "STORE_READ_END" })
+  | (Base & { event: "STORE_READ_ERROR" })
+  | (Base & { event: "STORE_ATOMIC_WRITE_BEGIN" })
+  | (Base & { event: "STORE_ATOMIC_WRITE_END" })
+  | (Base & { event: "STORE_SAVE_END" })
+  | (Base & { event: "STORE_SAVE_ERROR" })
+  | (Base & { event: "TERMINAL_PERSISTED"; pid: number | null; exit_code: number | null })
+  | (Base & { event: "CONTROLLER_SETTLED" });
 
 export type TimelineSink = (event: TimelineEvent) => void;
 
-/** 仅测试使用：把事件写成 JSONL 到指定目录（每次测试独立目录）。 */
-export function createTimelineSink(dir: string, fileName = "job-events.jsonl"): TimelineSink {
-  mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, fileName);
-  return (event) => {
-    appendFileSync(file, `${JSON.stringify({ ...event, timestamp: new Date().toISOString() })}\n`, "utf8");
+export interface MemoryTimeline {
+  sink: TimelineSink;
+  events: () => Array<TimelineEvent & { timestamp: string }>;
+  toJsonl: () => string;
+  byAttempt: () => Map<string, Array<TimelineEvent & { timestamp: string }>>;
+}
+
+/** 仅测试使用：内存收集，测试结束（含失败）再统一导出。 */
+export function createMemoryTimeline(): MemoryTimeline {
+  const buffer: Array<TimelineEvent & { timestamp: string }> = [];
+  return {
+    sink: (event) => {
+      buffer.push({ ...event, timestamp: new Date().toISOString() });
+    },
+    events: () => [...buffer],
+    toJsonl: () => buffer.map((event) => JSON.stringify(event)).join("\n") + (buffer.length ? "\n" : ""),
+    byAttempt: () => {
+      const groups = new Map<string, Array<TimelineEvent & { timestamp: string }>>();
+      for (const event of buffer) {
+        const key = `${event.job_id}#${event.attempt_id}`;
+        const list = groups.get(key) ?? [];
+        list.push(event);
+        groups.set(key, list);
+      }
+      return groups;
+    },
   };
 }

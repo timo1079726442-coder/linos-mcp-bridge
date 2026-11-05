@@ -142,6 +142,8 @@ export class JobStore {
   private readonly workspaceId: string;
   /** 诊断用（仅测试注入）；生产为 undefined，不写任何文件。 */
   private readonly timeline?: (event: import("./job-timeline.js").TimelineEvent) => void;
+  /** job_id → 当前 attempt 的诊断 ID（由 runner 登记，保证同一执行事件同 ID）。 */
+  private readonly attemptIds = new Map<string, string>();
 
   constructor(
     profileDir: string | null,
@@ -151,6 +153,11 @@ export class JobStore {
     this.workspaceId = safeWorkspaceId(workspaceId);
     this.directory = profileDir ? path.join(profileDir, "jobs", this.workspaceId) : null;
     this.timeline = timeline;
+  }
+
+  /** 诊断用：登记本次执行的 attempt_id（仅测试链路会调用）。 */
+  noteAttempt(jobId: string, attemptId: string): void {
+    this.attemptIds.set(jobId, attemptId);
   }
 
   private requireDir(): string {
@@ -245,12 +252,17 @@ export class JobStore {
   }
 
   async save(record: JobRecord): Promise<JobRecord> {
-    const attemptId = String(record.attempts);
+    const attemptId = this.attemptIds.get(record.id) ?? String(record.attempts);
     const base = { job_id: record.id, attempt_id: attemptId };
     this.timeline?.({ ...base, event: "STORE_SAVE_BEGIN" });
     try {
       // 取消是终态：并发写入时（runner 回写 vs cancel 落盘）不允许被覆盖回 RUNNING/FAILED。
-      const existing = await this.get(record.id).catch(() => null);
+      this.timeline?.({ ...base, event: "STORE_READ_BEGIN" });
+      const existing = await this.get(record.id).catch(() => {
+        this.timeline?.({ ...base, event: "STORE_READ_ERROR" });
+        return null;
+      });
+      this.timeline?.({ ...base, event: "STORE_READ_END" });
       const effective = existing?.state === "CANCELLED" && record.state !== "CANCELLED"
         ? { ...record, state: "CANCELLED" as const, cancelRequested: true }
         : record;

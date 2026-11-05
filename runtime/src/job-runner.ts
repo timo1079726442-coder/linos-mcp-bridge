@@ -221,6 +221,7 @@ async function runJob(
   const startedWall = Date.now();
   const emitRun = options.timeline ?? (() => undefined);
   const attemptId = controller.attemptId;
+  store.noteAttempt(id, attemptId);
   let record: JobRecord;
   try {
     record = await store.get(id);
@@ -415,6 +416,7 @@ async function runJob(
         ...(outcome.errorCode ? { errorCode: outcome.errorCode } : {}),
       }],
     });
+    emitRun({ job_id: id, attempt_id: attemptId, event: "TERMINAL_PERSISTED", pid: latest.pid ?? null, exit_code: exitCode });
   } catch (error) {
     const latest = await store.get(id).catch(() => null);
     if (latest && (latest.state === "RUNNING" || latest.state === "QUEUED")) {
@@ -440,5 +442,6 @@ async function runJob(
       }).catch(() => undefined);
     }
     finishActive(id);
+    emitRun({ job_id: id, attempt_id: attemptId, event: "CONTROLLER_SETTLED" });
   }
 }
