@@ -12,6 +12,7 @@ export interface ActiveJobController {
   profileDir: string;
   /** 本次 attempt 真正结束时 resolve；用于避免复用"正在清理"的旧控制器。 */
   settled: Promise<void>;
+  attemptId: string;
   settle: () => void;
 }
 
@@ -76,6 +77,8 @@ export interface LaunchOptions {
   workspaceRoot: string;
   profileDir: string;
   workspaceId: string;
+  /** 诊断用；只有测试会传，生产入口不传也不会写文件。 */
+  timeline?: (event: import("./job-timeline.js").TimelineEvent) => void;
 }
 
 /**
@@ -165,20 +168,25 @@ export async function launchJob(
   options: LaunchOptions,
 ): Promise<JobRecord> {
   // 旧 attempt 可能"终态已写、控制器尚未清理"：不能静默返回，必须等它真正结束后再决定。
+  const attemptId = `attempt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const emit = options.timeline ?? (() => undefined);
   const existing = activeJobs.get(record.id);
   if (existing) {
     await Promise.race([existing.settled, new Promise<void>((resolve) => setTimeout(resolve, 10_000))]);
     const stillThere = activeJobs.get(record.id);
     if (stillThere && stillThere === existing) {
       const snapshot = await store.get(record.id).catch(() => null);
-      if (snapshot?.state === "RUNNING") throw new Error("JOB_ALREADY_ACTIVE");
+      if (snapshot?.state === "RUNNING") {
+        emit({ job_id: record.id, attempt_id: attemptId, event: "LAUNCH_REJECTED" });
+        throw new Error("JOB_ALREADY_ACTIVE");
+      }
     }
   }
   // 必须先读最新记录：resume 传入的 record 可能是终态快照。
   let current = await store.get(record.id);
   let settle!: () => void;
   const settled = new Promise<void>((resolve) => { settle = resolve; });
-  const controller: ActiveJobController = { child: null, cancelRequested: current.cancelRequested, profileDir: options.profileDir, settled, settle };
+  const controller: ActiveJobController = { child: null, cancelRequested: current.cancelRequested, profileDir: options.profileDir, settled, settle, attemptId };
   activeJobs.set(record.id, controller);
   if (current.state !== "QUEUED" && current.state !== "INTERRUPTED" && current.state !== "FAILED" && current.state !== "TIMED_OUT" && current.state !== "CANCELLED") {
     finishActive(record.id);
@@ -211,6 +219,8 @@ async function runJob(
   controller: ActiveJobController,
 ): Promise<void> {
   const startedWall = Date.now();
+  const emitRun = options.timeline ?? (() => undefined);
+  const attemptId = controller.attemptId;
   let record: JobRecord;
   try {
     record = await store.get(id);
@@ -293,6 +303,7 @@ async function runJob(
     controller.child = child;
     // 关键：spawn 后立刻注册退出监听，避免短命进程在 await store.save() 期间退出而丢事件。
     const exitPromise = waitForExit(child);
+    emitRun({ job_id: id, attempt_id: attemptId, event: "WAIT_EXIT_ATTACHED", pid: child.pid ?? null });
     const pid = child.pid ?? null;
     record = await store.save({ ...record, pid, durationMs: 0 });
     if (controller.cancelRequested) {
