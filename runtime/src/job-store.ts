@@ -26,6 +26,7 @@ export interface JobSpec {
   clientId: string;
   workspaceId: string;
   idempotencyKey?: string;
+  auditOperationId?: string;
   mode?: "user" | "constrained";
   message?: string;
   allowEmpty?: boolean;
@@ -65,6 +66,7 @@ export interface JobRecord {
   lastOutputAt: string | null;
   checkpoints: JobCheckpoint[];
   resultSummary?: string;
+  auditState?: "PERSISTED" | "PENDING";
   createdAt: string;
   updatedAt: string;
   startedAt: string | null;
@@ -83,6 +85,7 @@ export interface JobStartInput {
   cwdDisplay: string;
   timeoutMs: number;
   idempotencyKey?: string;
+  auditOperationId?: string;
   mode?: "user" | "constrained";
   message?: string;
   allowEmpty?: boolean;
@@ -104,6 +107,7 @@ export interface JobStatus {
   last_output_at: string | null;
   progress: string;
   error_code?: string;
+  audit_state?: "PERSISTED" | "PENDING" | null;
   finished_at: string | null;
 }
 
@@ -217,6 +221,7 @@ export class JobStore {
         clientId: input.clientId,
         workspaceId: this.workspaceId,
         ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+        ...(input.auditOperationId ? { auditOperationId: input.auditOperationId } : {}),
         ...(input.mode ? { mode: input.mode } : {}),
         ...(input.message ? { message: input.message.slice(0, 500) } : {}),
         ...(input.allowEmpty !== undefined ? { allowEmpty: input.allowEmpty } : {}),
@@ -235,6 +240,7 @@ export class JobStore {
       lastHeartbeatAt: null,
       lastOutputAt: null,
       checkpoints: [{ at: now, message: "queued" }],
+      ...(input.auditOperationId ? { auditState: "PENDING" as const } : {}),
       createdAt: now,
       updatedAt: now,
       startedAt: null,
@@ -315,6 +321,9 @@ export class JobStore {
             truncatedOutput: existing.truncatedOutput || effective.truncatedOutput,
             lastHeartbeatAt: laterTimestamp(existing.lastHeartbeatAt, effective.lastHeartbeatAt),
             lastOutputAt: laterTimestamp(existing.lastOutputAt, effective.lastOutputAt),
+            auditState: explicitResume || newAttempt
+              ? effective.auditState
+              : existing.auditState === "PERSISTED" ? "PERSISTED" : effective.auditState ?? existing.auditState,
             ...(explicitResume || newAttempt ? {} : {
               durationMs: Math.max(existing.durationMs, effective.durationMs),
               cancelRequested: existing.cancelRequested || effective.cancelRequested,
@@ -438,6 +447,7 @@ export class JobStore {
       last_output_at: record.lastOutputAt,
       progress,
       ...(record.errorCode ? { errorCode: record.errorCode } : {}),
+      audit_state: record.auditState ?? null,
       finished_at: record.finishedAt,
     };
   }

@@ -13,7 +13,6 @@ import {
 } from "./capability.js";
 import { detectWorkspace, type WorkspaceInfo } from "./workspace.js";
 import { dispatchMcp, TOOL_INVENTORY, type McpCallerContext, type McpCreateIntentBridge } from "./mcp-tools.js";
-import { appendToolAudit } from "./tool-audit.js";
 import { ExecutionRecordStore } from "./execution-store.js";
 import { JobStore } from "./job-store.js";
 import { recoverInterruptedJobs } from "./job-runner.js";

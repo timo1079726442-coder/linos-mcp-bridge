@@ -36,6 +36,7 @@ export interface JobWorkspace {
   profileDir: string;
   caller?: McpCallerContext;
   shellScopeGranted?: boolean;
+  auditOperationId?: string;
 }
 
 function requireCaller(ws: JobWorkspace): string {
@@ -150,7 +151,7 @@ function timelineOf(ws: unknown): ((event: import("./job-timeline.js").TimelineE
 export async function startJobTool(
   ws: JobWorkspace,
   args: Record<string, unknown>,
-): Promise<{ job_id: string; state: string; poll_hint_ms: number; resumed: boolean }> {
+): Promise<{ job_id: string; state: string; poll_hint_ms: number; resumed: boolean; auditState?: string; auditDurability?: string }> {
   const clientId = requireCaller(ws);
   requireShellScope(ws);
   const profileDir = ws.profileDir;
@@ -206,6 +207,7 @@ export async function startJobTool(
     cwdDisplay: cwd.display,
     timeoutMs,
     ...(idempotencyKey ? { idempotencyKey } : {}),
+    ...(ws.auditOperationId ? { auditOperationId: ws.auditOperationId } : {}),
     ...(mode ? { mode } : {}),
     ...(message ? { message } : {}),
     ...(allowEmpty !== undefined ? { allowEmpty } : {}),
@@ -221,6 +223,29 @@ export async function startJobTool(
     }
     await ensureActiveSlot(store, profileDir, ws.workspaceId);
     const created = await store.create(input);
+    let auditState: string | undefined;
+    let auditDurability: string | undefined;
+    if (ws.auditOperationId) {
+      try {
+        const { appendToolAuditExecutionStarted } = await import("./tool-audit.js");
+        const receipt = await appendToolAuditExecutionStarted(profileDir, ws.workspaceId, {
+          tool: "start_job", command: input.display, path: input.cwdDisplay, clientId,
+        }, ws.auditOperationId);
+        auditState = "EXECUTION_STARTED_DURABLE";
+        auditDurability = receipt.durability;
+      } catch (error) {
+        const code = error instanceof Error && "code" in error ? String((error as Error & { code?: unknown }).code) : "AUDIT_UNAVAILABLE";
+        await store.save({
+          ...created,
+          state: "FAILED",
+          finishedAt: new Date().toISOString(),
+          errorCode: "AUDIT_UNAVAILABLE",
+          errorMessage: `audit execution-start persist failed (${code})`,
+          auditState: "PENDING",
+        });
+        throw new Error(`AUDIT_UNAVAILABLE：后台任务执行意图未能持久化（${code}），未启动 child。`);
+      }
+    }
     await launchJob(store, created, {
       timeline: timelineOf(ws),
       workspaceRoot: ws.boundary.rootReal,
@@ -228,7 +253,10 @@ export async function startJobTool(
       workspaceId: ws.workspaceId,
     });
     const view = await store.get(created.id);
-    return { job_id: view.id, state: view.state, poll_hint_ms: 5000, resumed: false };
+    return {
+      job_id: view.id, state: view.state, poll_hint_ms: 5000, resumed: false,
+      ...(auditState ? { auditState, auditDurability } : {}),
+    };
   });
 }
 
@@ -240,6 +268,14 @@ export async function jobStatusTool(ws: JobWorkspace, args: Record<string, unkno
   requireSameWorkspace(record, ws.workspaceId);
   requireSameClient(record, clientId);
   record = await markOrphaned(store, record);
+  if (record.state === "SUCCEEDED" || record.state === "FAILED" || record.state === "CANCELLED"
+    || record.state === "TIMED_OUT" || record.state === "INTERRUPTED") {
+    if (isJobActive(id)) {
+      await waitForActiveJobSettled(id);
+      record = await store.get(id);
+      record = await markOrphaned(store, record);
+    }
+  }
   const status = store.toStatus(record);
   return {
     ...status,
@@ -327,7 +363,7 @@ export async function jobCancelTool(ws: JobWorkspace, args: Record<string, unkno
   });
 }
 
-export async function jobResumeTool(ws: JobWorkspace, args: Record<string, unknown>): Promise<{ job_id: string; state: string; poll_hint_ms: number }> {
+export async function jobResumeTool(ws: JobWorkspace, args: Record<string, unknown>): Promise<{ job_id: string; state: string; poll_hint_ms: number; resumed: boolean; auditState?: string; auditDurability?: string }> {
   const clientId = requireCaller(ws);
   requireShellScope(ws);
   const profileDir = ws.profileDir;
@@ -343,7 +379,7 @@ export async function jobResumeTool(ws: JobWorkspace, args: Record<string, unkno
     requireSameClient(record, clientId);
     record = await markOrphaned(store, record);
     if (isJobActive(id) && (record.state === "RUNNING" || record.state === "QUEUED")) {
-      return { job_id: record.id, state: record.state, poll_hint_ms: 5000 };
+      return { job_id: record.id, state: record.state, poll_hint_ms: 5000, resumed: true };
     }
     if (isJobActive(id)) {
       await waitForActiveJobSettled(id);
@@ -356,7 +392,17 @@ export async function jobResumeTool(ws: JobWorkspace, args: Record<string, unkno
       throw new Error("JOB_NOT_RESUMABLE");
     }
     await assertUnderlyingToolEnabled(ws.profileDir, ws.workspaceId, record.spec.kind === "run_powershell" ? "run_powershell" : record.spec.kind === "git_commit" ? "git_commit" : "execute_command");
-    await recoverInterruptedJobsForResume(store, record);
+    let auditState: string | undefined;
+    let auditDurability: string | undefined;
+    if (ws.auditOperationId) {
+      const { appendToolAuditExecutionStarted } = await import("./tool-audit.js");
+      const receipt = await appendToolAuditExecutionStarted(profileDir, ws.workspaceId, {
+        tool: "job_resume", path: record.id, command: record.spec.display, clientId,
+      }, ws.auditOperationId);
+      auditState = "EXECUTION_STARTED_DURABLE";
+      auditDurability = receipt.durability;
+    }
+    await recoverInterruptedJobsForResume(store, record, ws.auditOperationId);
     const queued = await store.get(id);
     const { launchJob } = await import("./job-runner.js");
     await launchJob(store, queued, {
@@ -366,16 +412,23 @@ export async function jobResumeTool(ws: JobWorkspace, args: Record<string, unkno
       workspaceId: ws.workspaceId,
     });
     const view = await store.get(id);
-    return { job_id: view.id, state: view.state, poll_hint_ms: 5000 };
+    return {
+      job_id: view.id, state: view.state, poll_hint_ms: 5000, resumed: false,
+      ...(auditState ? { auditState, auditDurability } : {}),
+    };
   });
 }
 
-async function recoverInterruptedJobsForResume(store: JobStore, record: JobRecord): Promise<void> {
+async function recoverInterruptedJobsForResume(store: JobStore, record: JobRecord, auditOperationId?: string): Promise<void> {
   // CANCELLED 也要重置为 QUEUED：否则 resume 通过入口校验后，
   // launchJob 仍看到 CANCELLED 状态而抛 JOB_NOT_RESUMABLE（实测 189ms 自杀）。
   if (record.state !== "INTERRUPTED" && record.state !== "TIMED_OUT" && record.state !== "FAILED" && record.state !== "CANCELLED") return;
   await store.save({
     ...record,
+    ...(auditOperationId ? {
+      spec: { ...record.spec, auditOperationId },
+      auditState: "PENDING" as const,
+    } : {}),
     state: "QUEUED",
     finishedAt: null,
     exitCode: null,

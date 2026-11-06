@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { execFile } from "node:child_process";
@@ -310,6 +310,8 @@ export interface McpDispatchOptions {
   readonly toolPolicyDir?: string;
   /** 是否持有 workspace.shell（命令/PowerShell/git_commit）。 */
   readonly shellScopeGranted?: boolean;
+  /** Durable high-risk audit operation ID; supplied only by dispatchMcp after intent persistence. */
+  readonly auditOperationId?: string;
   /** 控制中心展示连接器配置用：本地实际监听端口与公网 MCP 地址。 */
   readonly localPort?: number;
   readonly publicMcpUrl?: string | null;
@@ -335,6 +337,34 @@ interface GitSnapshot {
   behind?: number | null;
 }
 
+function isHighRiskAuditTool(tool: string): boolean {
+  return WRITE_SCOPE_TOOL_NAMES.has(tool)
+    || SHELL_SCOPE_TOOL_NAMES.has(tool)
+    || tool === "job_cancel"
+    || tool === "workflow_prepare"
+    || tool === "workflow_commit"
+    || tool === "workflow_continue"
+    || tool === "workflow_cancel"
+    || tool === "workflow_run_step"
+    || tool === "shadcn_add"
+    || tool === "shadcn_init";
+}
+
+function withAuditState(result: unknown, auditState: string, operationId: string, durability?: string): unknown {
+  const auditMeta = { auditState, auditOperationId: operationId, ...(durability ? { auditDurability: durability } : {}) };
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const record = result as Record<string, unknown>;
+    const existingMeta = record._meta && typeof record._meta === "object" ? record._meta as Record<string, unknown> : {};
+    return { ...record, _meta: { ...existingMeta, ...auditMeta } };
+  }
+  return { value: result, _meta: auditMeta };
+}
+
+function auditErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.split(/[:：]/)[0]?.trim().slice(0, 80) || "TOOL_CALL_FAILED";
+}
+
 export async function dispatchMcp(
   body: unknown,
   workspaceId: string,
@@ -348,42 +378,85 @@ export async function dispatchMcp(
     : "";
   const profileDir = dispatchOptions.toolPolicyDir
     ?? (executionStorePath ? path.dirname(executionStorePath) : "");
-  if (method !== "tools/call" || !tool || !profileDir) {
+  if (method !== "tools/call" || !tool) {
     return dispatchMcpInner(body, workspaceId, workspaceRoot, executionStorePath, dispatchOptions);
   }
+
   const args = ((body as { params?: { arguments?: Record<string, unknown> } })?.params?.arguments ?? {}) as Record<string, unknown>;
   const started = Date.now();
-  const pathArg = typeof args.path === "string" ? args.path : undefined;
-  const commandArg = typeof args.command === "string" ? args.command : undefined;
+  const operationId = randomUUID();
+  const highRisk = isHighRiskAuditTool(tool);
+  const auditInput = {
+    tool,
+    durationMs: 0,
+    path: typeof args.path === "string" ? args.path : typeof args.cwd === "string" ? args.cwd : undefined,
+    paths: Array.isArray(args.paths) ? args.paths.filter((value): value is string => typeof value === "string") : undefined,
+    command: typeof args.command === "string" ? args.command
+      : tool === "git_commit" && typeof args.message === "string" ? `git commit -m ${args.message}` : undefined,
+    clientId: dispatchOptions.caller?.clientId,
+    workspaceRoot,
+    ...(typeof args.idempotency_key === "string" ? { idempotencyKey: args.idempotency_key } : {}),
+  };
+  let auditModule: typeof import("./tool-audit.js") | null = null;
+  let intentDurability: string | undefined;
+  if (highRisk) {
+    if (!profileDir) throw new Error("AUDIT_UNAVAILABLE：高风险操作缺少可用审计目录，未执行。");
+    try {
+      auditModule = await import("./tool-audit.js");
+      const intent = await auditModule.appendToolAuditIntent(profileDir, workspaceId, auditInput, operationId);
+      intentDurability = intent.durability;
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? String((error as Error & { code?: unknown }).code) : "AUDIT_UNAVAILABLE";
+      throw new Error(`AUDIT_UNAVAILABLE：高风险操作的审计意图未能持久化（${code}），未执行。`);
+    }
+  }
+  const optionsWithAudit = highRisk ? { ...dispatchOptions, auditOperationId: operationId } : dispatchOptions;
+  let result: unknown;
   try {
-    const result = await dispatchMcpInner(body, workspaceId, workspaceRoot, executionStorePath, dispatchOptions);
-    const data = (result as { result?: unknown })?.result ?? result;
-    const record = (data ?? {}) as { bytes?: unknown; sha256?: unknown };
-    const { appendToolAudit } = await import("./tool-audit.js");
-    await appendToolAudit(profileDir, {
-      tool,
-      ok: true,
-      durationMs: Date.now() - started,
-      path: pathArg,
-      command: commandArg,
-      bytes: typeof record.bytes === "number" ? record.bytes : undefined,
-      sha256: typeof record.sha256 === "string" ? record.sha256 : undefined,
-      clientId: dispatchOptions.caller?.clientId,
-    });
-    return result;
+    result = await dispatchMcpInner(body, workspaceId, workspaceRoot, executionStorePath, optionsWithAudit);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const { appendToolAudit } = await import("./tool-audit.js");
-    await appendToolAudit(profileDir, {
-      tool,
-      ok: false,
-      durationMs: Date.now() - started,
-      path: pathArg,
-      command: commandArg,
-      errorCode: message.split(/[:：]/)[0]?.trim().slice(0, 80) || "TOOL_CALL_FAILED",
-      clientId: dispatchOptions.caller?.clientId,
-    });
+    if (profileDir) {
+      try {
+        auditModule ??= await import("./tool-audit.js");
+        const failedInput = { ...auditInput, ok: false, durationMs: Date.now() - started, errorCode: auditErrorCode(error) };
+        if (highRisk) await auditModule.appendToolAuditResult(profileDir, workspaceId, failedInput, operationId);
+        else await auditModule.appendReadOnlyToolAudit(profileDir, workspaceId, failedInput, operationId);
+      } catch {
+        if (highRisk) throw new Error(`AUDIT_PENDING：操作 ${operationId} 的执行结果无法持久化；不得自动重放。`);
+      }
+    }
     throw error;
+  }
+
+  const resultRecord = result && typeof result === "object" ? result as Record<string, unknown> : {};
+  const idempotentReuse = resultRecord.resumed === true;
+  const completedInput = {
+    ...auditInput,
+    ok: true,
+    durationMs: Date.now() - started,
+    ...(typeof resultRecord.bytes === "number" ? { bytes: resultRecord.bytes } : {}),
+    ...(typeof resultRecord.sha256 === "string" ? { sha256: resultRecord.sha256 } : {}),
+  };
+  if (!profileDir) return withAuditState(result, "PENDING", operationId);
+  try {
+    auditModule ??= await import("./tool-audit.js");
+    if (!highRisk) {
+      const receipt = await auditModule.appendReadOnlyToolAudit(profileDir, workspaceId, completedInput, operationId);
+      return withAuditState(result, "PERSISTED", operationId, receipt.durability);
+    }
+    if (tool === "start_job" || tool === "job_resume") {
+      if (idempotentReuse) {
+        const receipt = await auditModule.appendToolAuditResult(profileDir, workspaceId, completedInput, operationId);
+        return withAuditState(result, "PERSISTED", operationId, receipt.durability);
+      }
+      const state = resultRecord.auditState === "EXECUTION_STARTED_DURABLE" ? "EXECUTION_STARTED_DURABLE" : "PENDING";
+      return withAuditState(result, state, operationId,
+        typeof resultRecord.auditDurability === "string" ? resultRecord.auditDurability : intentDurability);
+    }
+    const receipt = await auditModule.appendToolAuditResult(profileDir, workspaceId, completedInput, operationId);
+    return withAuditState(result, "PERSISTED", operationId, receipt.durability);
+  } catch {
+    return withAuditState(result, "PENDING", operationId, intentDurability);
   }
 }
 
@@ -481,6 +554,7 @@ async function dispatchMcpInner(
       profileDir,
       caller: ws.dispatchOptions.caller,
       shellScopeGranted: ws.dispatchOptions.shellScopeGranted,
+      auditOperationId: ws.dispatchOptions.auditOperationId,
     });
     return ws.boundary.redact(data);
   }

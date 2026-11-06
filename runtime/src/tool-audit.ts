@@ -1,116 +1,276 @@
-import { redactString } from "./redaction.js";
-/**
- * 工具调用哈希链审计。
- *
- * 设计要点：
- * - 每条记录包含 prevHash + hash，任何一条被改都会断链；
- * - 只记录工具名、路径/命令、结果与哈希，不记录文件正文；
- * - 命令与错误码先脱敏再截断，避免把令牌写进审计；\n * - 追加失败会抛给调用方：写入/命令类操作应据此 fail-closed。
- */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
+import { Worker } from "node:worker_threads";
+import { redactString } from "./redaction.js";
+
+export type ToolAuditKind = "INTENT_DURABLE" | "EXECUTION_STARTED_DURABLE" | "RESULT_DURABLE" | "READ_RESULT";
 
 export interface ToolAuditInput {
-
   tool: string;
-  ok: boolean;
-  durationMs: number;
+  ok?: boolean;
+  durationMs?: number;
   path?: string;
   paths?: string[];
   command?: string;
   bytes?: number;
   sha256?: string;
   errorCode?: string;
-  /** 调用方标识：c2c_api_token=长期令牌客户端；c2c_client_*=OAuth 客户端。 */
   clientId?: string;
+  idempotencyKey?: string;
+  workspaceRoot?: string;
 }
 
-interface ToolAuditEntry extends ToolAuditInput {
+export interface AuditReceipt {
+  operationId: string;
   seq: number;
-  at: string;
-  prevHash: string;
+  hash: string;
+  durability: "FILE_AND_DIRECTORY_SYNC" | "FILE_SYNC_ONLY";
 }
 
-const GENESIS = "0".repeat(64);
-const queues = new Map<string, Promise<void>>();
-
-export function toolAuditPath(profileDir: string): string {
-  return path.join(profileDir, "audit", "tool-calls.jsonl");
-}
-
-function digest(prevHash: string, entry: ToolAuditEntry): string {
-  return createHash("sha256").update(prevHash).update(JSON.stringify(entry)).digest("hex");
-}
-
-async function readTail(file: string): Promise<{ seq: number; hash: string }> {
-  try {
-    const raw = await fs.readFile(file, "utf8");
-    const lines = raw.split(/\r?\n/).filter(Boolean);
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-      try {
-        const parsed = JSON.parse(lines[index]) as { seq?: unknown; hash?: unknown };
-        if (typeof parsed.seq === "number" && typeof parsed.hash === "string") {
-          return { seq: parsed.seq, hash: parsed.hash };
-        }
-      } catch {
-        /* 跳过损坏行，继续向前找 */
-      }
-    }
-    return { seq: 0, hash: GENESIS };
-  } catch {
-    return { seq: 0, hash: GENESIS };
+export class AuditJournalError extends Error {
+  constructor(readonly code: string, message = code) {
+    super(message);
+    this.name = "AuditJournalError";
   }
 }
 
-export async function appendToolAudit(profileDir: string, input: ToolAuditInput): Promise<void> {
-  const file = toolAuditPath(profileDir);
-  const previous = queues.get(file) ?? Promise.resolve();
-  const next = previous.then(async () => {
-    await fs.mkdir(path.dirname(file), { recursive: true });
-    const tail = await readTail(file);
-    const entry: ToolAuditEntry = {
-      seq: tail.seq + 1,
-      at: new Date().toISOString(),
-      prevHash: tail.hash,
-      ...input,
-    };
-    // 先脱敏再截断：命令参数里可能带 token，脱敏必须在落盘前。
-    if (entry.command) entry.command = redactString(entry.command).slice(0, 200);
-    if (typeof entry.errorCode === "string") entry.errorCode = redactString(entry.errorCode).slice(0, 120);
-    const hash = digest(tail.hash, entry);
-    await fs.appendFile(file, `${JSON.stringify({ ...entry, hash })}\n`, "utf8");
+interface WorkerResponse {
+  id: string;
+  ok: boolean;
+  result?: unknown;
+  errorCode?: string;
+}
+
+interface PendingRequest {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+}
+
+const MAX_PENDING_REQUESTS = 1024;
+const AUDIT_TIMEOUT_MS = 5_000;
+const WORKSPACE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const WORKER_ID = randomUUID();
+const pending = new Map<string, PendingRequest>();
+let worker: Worker | null = null;
+
+function safeWorkspaceId(workspaceId: string): string {
+  if (!WORKSPACE_ID_RE.test(workspaceId)) throw new AuditJournalError("AUDIT_WORKSPACE_INVALID");
+  return workspaceId;
+}
+
+export function toolAuditPath(profileDir: string, workspaceId = "default"): string {
+  if (!profileDir) throw new AuditJournalError("AUDIT_DIR_UNAVAILABLE");
+  return path.join(profileDir, "audit", `${safeWorkspaceId(workspaceId)}.journal.jsonl`);
+}
+
+function sanitizePath(value: string, workspaceRoot?: string): string {
+  const redacted = redactString(value).replace(/\\/g, "/");
+  const root = workspaceRoot ? path.resolve(workspaceRoot).replace(/\\/g, "/").replace(/\/$/, "") : "";
+  const resolved = path.isAbsolute(value) ? path.resolve(value).replace(/\\/g, "/") : "";
+  if (root && resolved && (resolved === root || resolved.startsWith(`${root}/`))) {
+    return resolved === root ? "." : path.relative(root, resolved).replace(/\\/g, "/").slice(0, 512);
+  }
+  return redacted
+    .replace(/^([A-Za-z]:)?\/?Users\/[^/]+/i, "$1/Users/<user>")
+    .replace(/^\/home\/[^/]+/i, "/home/<user>")
+    .slice(0, 512);
+}
+
+function sanitizeInput(input: ToolAuditInput): Record<string, unknown> {
+  const tool = typeof input.tool === "string" ? input.tool.replace(/[^A-Za-z0-9_.:-]/g, "_").slice(0, 100) : "unknown";
+  if (!tool) throw new AuditJournalError("AUDIT_SCHEMA_INVALID");
+  const fields: Record<string, unknown> = { tool };
+  if (typeof input.ok === "boolean") fields.ok = input.ok;
+  if (typeof input.durationMs === "number" && Number.isFinite(input.durationMs)) fields.durationMs = Math.max(0, Math.min(24 * 60 * 60 * 1000, Math.floor(input.durationMs)));
+  if (typeof input.path === "string") fields.path = sanitizePath(input.path, input.workspaceRoot);
+  if (Array.isArray(input.paths)) fields.paths = input.paths.slice(0, 25).filter((item): item is string => typeof item === "string").map((item) => sanitizePath(item, input.workspaceRoot));
+  if (typeof input.command === "string") {
+    const command = input.command.trim();
+    const executable = command.split(/\s+/, 1)[0]?.replace(/^["']|["']$/g, "") ?? "";
+    if (executable) fields.commandProgram = path.basename(executable).slice(0, 80);
+    fields.commandSha256 = createHash("sha256").update(command).digest("hex");
+  }
+  if (typeof input.bytes === "number" && Number.isSafeInteger(input.bytes) && input.bytes >= 0) fields.bytes = input.bytes;
+  if (typeof input.sha256 === "string" && /^[0-9a-f]{64}$/i.test(input.sha256)) fields.sha256 = input.sha256.toLowerCase();
+  if (typeof input.errorCode === "string") fields.errorCode = redactString(input.errorCode).slice(0, 120);
+  if (typeof input.clientId === "string") fields.clientIdHash = createHash("sha256").update(input.clientId).digest("hex");
+  if (typeof input.idempotencyKey === "string" && input.idempotencyKey.length > 0) {
+    fields.idempotencyKeyHash = createHash("sha256").update(input.idempotencyKey).digest("hex");
+  }
+  return fields;
+}
+
+function failAllPending(error: Error): void {
+  for (const request of pending.values()) {
+    clearTimeout(request.timer);
+    request.reject(error);
+  }
+  pending.clear();
+}
+
+function disposeWorker(target: Worker, error: Error): void {
+  if (worker === target) worker = null;
+  failAllPending(error);
+  void target.terminate().catch(() => undefined);
+}
+
+function ensureWorker(): Worker {
+  if (worker) return worker;
+  const created = new Worker(new URL("./audit-journal-worker.js", import.meta.url));
+  created.unref();
+  created.on("message", (response: WorkerResponse) => {
+    const request = pending.get(response.id);
+    if (!request) return;
+    pending.delete(response.id);
+    clearTimeout(request.timer);
+    if (pending.size === 0) created.unref();
+    if (response.ok) request.resolve(response.result);
+    else request.reject(new AuditJournalError(response.errorCode ?? "AUDIT_UNAVAILABLE"));
   });
-  // 并发压力下审计写失败不应让业务调用失败（实测会让后台任务误判失败）。
-  // fail-closed 需要配合队列超时与重试单独设计，见 ROADMAP。
-  queues.set(file, next.catch(() => undefined));
-  await next.catch((error: unknown) => {
-    console.error(`tool audit append failed: ${error instanceof Error ? error.message : String(error)}`);
+  created.on("error", (error: Error) => disposeWorker(created, new AuditJournalError("AUDIT_WORKER_FAILED", error.message)));
+  created.on("exit", (code: number) => {
+    if (worker === created) disposeWorker(created, new AuditJournalError("AUDIT_WORKER_EXITED", `worker exit ${code}`));
+  });
+  worker = created;
+  return created;
+}
+
+async function requestWorker<T>(message: Record<string, unknown>, timeoutMs = AUDIT_TIMEOUT_MS): Promise<T> {
+  if (pending.size >= MAX_PENDING_REQUESTS) throw new AuditJournalError("AUDIT_QUEUE_FULL");
+  const target = ensureWorker();
+  const id = randomUUID();
+  target.ref();
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const request = pending.get(id);
+      if (!request) return;
+      pending.delete(id);
+      reject(new AuditJournalError("AUDIT_TIMEOUT"));
+      if (pending.size === 0) target.unref();
+    }, timeoutMs);
+    pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
+    try {
+      target.postMessage({ ...message, id, workerId: WORKER_ID });
+    } catch (error) {
+      pending.delete(id);
+      clearTimeout(timer);
+      if (pending.size === 0) target.unref();
+      reject(new AuditJournalError("AUDIT_WORKER_FAILED", error instanceof Error ? error.message : "worker post failed"));
+    }
   });
 }
 
-export async function verifyToolAudit(profileDir: string): Promise<{ ok: boolean; entries: number; brokenAt?: number }> {
-  const file = toolAuditPath(profileDir);
-  let raw = "";
+export async function appendToolAuditEvent(
+  profileDir: string,
+  workspaceId: string,
+  kind: ToolAuditKind,
+  input: ToolAuditInput,
+  operationId: string = randomUUID(),
+): Promise<AuditReceipt> {
+  const targetWorkspaceId = safeWorkspaceId(workspaceId);
+  const file = toolAuditPath(profileDir, targetWorkspaceId);
+  const fields = sanitizeInput(input);
+  const tool = String(fields.tool);
+  delete fields.tool;
+  return requestWorker<AuditReceipt>({
+    action: "append",
+    file,
+    workspaceId: targetWorkspaceId,
+    operationId,
+    kind,
+    tool,
+    fields,
+  });
+}
+
+export function appendToolAuditIntent(
+  profileDir: string,
+  workspaceId: string,
+  input: ToolAuditInput,
+  operationId: string = randomUUID(),
+): Promise<AuditReceipt> {
+  return appendToolAuditEvent(profileDir, workspaceId, "INTENT_DURABLE", input, operationId);
+}
+
+export function appendToolAuditExecutionStarted(
+  profileDir: string,
+  workspaceId: string,
+  input: ToolAuditInput,
+  operationId: string,
+): Promise<AuditReceipt> {
+  return appendToolAuditEvent(profileDir, workspaceId, "EXECUTION_STARTED_DURABLE", input, operationId);
+}
+
+export function appendToolAuditResult(
+  profileDir: string,
+  workspaceId: string,
+  input: ToolAuditInput,
+  operationId: string,
+): Promise<AuditReceipt> {
+  return appendToolAuditEvent(profileDir, workspaceId, "RESULT_DURABLE", input, operationId);
+}
+
+export function appendReadOnlyToolAudit(
+  profileDir: string,
+  workspaceId: string,
+  input: ToolAuditInput,
+  operationId: string = randomUUID(),
+): Promise<AuditReceipt> {
+  return appendToolAuditEvent(profileDir, workspaceId, "READ_RESULT", input, operationId);
+}
+
+/** Backward-compatible audit append for non-MCP internal metadata. */
+export function appendToolAudit(profileDir: string, input: ToolAuditInput): Promise<AuditReceipt> {
+  return appendReadOnlyToolAudit(profileDir, "default", input);
+}
+
+async function verifyLegacyToolAudit(profileDir: string): Promise<Record<string, unknown>> {
+  const file = path.join(profileDir, "audit", "tool-calls.jsonl");
+  let raw: string;
   try {
     raw = await fs.readFile(file, "utf8");
-  } catch {
-    return { ok: true, entries: 0 };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { ok: true, entries: 0 };
+    return { ok: false, entries: 0, errorCode: "LEGACY_AUDIT_READ_FAILED" };
   }
   const lines = raw.split(/\r?\n/).filter(Boolean);
-  let prev = GENESIS;
+  let previousHash = "0".repeat(64);
   for (let index = 0; index < lines.length; index += 1) {
-    let parsed: (ToolAuditEntry & { hash?: string }) | null = null;
-    try {
-      parsed = JSON.parse(lines[index]) as ToolAuditEntry & { hash?: string };
-    } catch {
-      return { ok: false, entries: lines.length, brokenAt: index + 1 };
+    let parsed: Record<string, unknown>;
+    try { parsed = JSON.parse(lines[index]) as Record<string, unknown>; }
+    catch { return { ok: false, entries: lines.length, brokenAt: index + 1, errorCode: "LEGACY_AUDIT_CORRUPT" }; }
+    const hash = parsed.hash;
+    const entry = { ...parsed };
+    delete entry.hash;
+    if (typeof hash !== "string" || entry.prevHash !== previousHash || entry.seq !== index + 1
+      || createHash("sha256").update(previousHash).update(JSON.stringify(entry)).digest("hex") !== hash) {
+      return { ok: false, entries: lines.length, brokenAt: index + 1, errorCode: "LEGACY_AUDIT_CORRUPT" };
     }
-    const { hash, ...entry } = parsed;
-    if (!hash || entry.prevHash !== prev || digest(prev, entry) !== hash) {
-      return { ok: false, entries: lines.length, brokenAt: index + 1 };
-    }
-    prev = hash;
+    previousHash = hash;
+  }
+  if (raw.length > 0 && !raw.endsWith("\n")) {
+    return { ok: false, entries: lines.length, brokenAt: lines.length, errorCode: "LEGACY_AUDIT_TORN_TAIL" };
   }
   return { ok: true, entries: lines.length };
+}
+
+export async function verifyToolAudit(profileDir: string, workspaceId?: string): Promise<Record<string, unknown>> {
+  const auditDir = path.join(profileDir, "audit");
+  const current = workspaceId
+    ? await requestWorker<Record<string, unknown>>({ action: "verify", file: toolAuditPath(profileDir, workspaceId) })
+    : await requestWorker<Record<string, unknown>>({ action: "verify", auditDir });
+  const legacy = await verifyLegacyToolAudit(profileDir);
+  const currentPending = Array.isArray(current.pendingOperations) ? current.pendingOperations : [];
+  const legacyBroken = legacy.ok === false;
+  return {
+    ...current,
+    ok: current.ok === true && legacy.ok === true,
+    entries: Number(current.entries ?? 0) + Number(legacy.entries ?? 0),
+    pendingOperations: currentPending,
+    legacy,
+    ...(current.ok === true && legacyBroken ? { brokenAt: legacy.brokenAt, errorCode: legacy.errorCode } : {}),
+  };
 }

@@ -66,6 +66,13 @@ M7 要求：高风险操作在执行前，审计意图必须获得**持久化确
 | 直接升级 Electron 到 37+ | 属独立升级项（ABI/原生依赖/打包/CI 全需重验），不与 M7 混做 |
 | 纯内存队列 | 不满足持久化确认 |
 
+## v0.1.1 implementation status (2026-11-06)
+
+- Runtime audit writes now use a Worker-backed per-workspace journal, an `O_EXCL` lock with stale-owner recovery, contiguous `seq`, record length + CRC32 + SHA-256 chain validation, and file `sync()` before acknowledging persistence.
+- High-risk MCP calls persist `INTENT_DURABLE` before dispatch; command/write/Git/job failures before intent return `AUDIT_UNAVAILABLE` without running the effect. Read-only calls expose `_meta.auditState` as `PERSISTED` or `PENDING`. Background job attempts link their terminal `RESULT_DURABLE` to the persisted operation ID. Legacy `tool-calls.jsonl` is left untouched and verified read-only.
+- **Windows durability limitation (release gate):** on Windows/Node 24.21, `fsync(file)` succeeded but `fsync(directory)` returned `EPERM`. Windows therefore currently reports `FILE_SYNC_ONLY`; POSIX reports `FILE_AND_DIRECTORY_SYNC`. No native addon was added, per the portable-runtime decision. Do not claim the ADR's full directory-entry durability on Windows or release v0.1.1 until a stronger Windows primitive is demonstrated or this boundary is explicitly accepted.
+- Targeted audit suite: 12 passed. Full runtime suite after integration: 126 passed. Clean-package/Windows release verification remains pending.
+
 ## Electron 升级（独立跟踪）
 
 M7 完成后单独立项 `33 → 37 (Node 22)`；届时可把日志后端换成 `node:sqlite`，队列/状态机/去重语义不变。

@@ -15,6 +15,7 @@ export interface ActiveJobController {
   /** 本次 attempt 真正结束时 resolve；用于避免复用"正在清理"的旧控制器。 */
   settled: Promise<void>;
   attemptId: string;
+  auditOperationId?: string;
   settle: () => void;
 }
 
@@ -213,7 +214,7 @@ export async function launchJob(
   let current = await store.get(record.id);
   let settle!: () => void;
   const settled = new Promise<void>((resolve) => { settle = resolve; });
-  const controller: ActiveJobController = { child: null, cancelRequested: current.cancelRequested, profileDir: options.profileDir, workspaceId: options.workspaceId, settled, settle, attemptId };
+  const controller: ActiveJobController = { child: null, cancelRequested: current.cancelRequested, profileDir: options.profileDir, workspaceId: options.workspaceId, settled, settle, attemptId, ...(current.spec.auditOperationId ? { auditOperationId: current.spec.auditOperationId } : {}) };
   activeJobs.set(record.id, controller);
   if (current.state !== "QUEUED" && current.state !== "INTERRUPTED" && current.state !== "FAILED" && current.state !== "TIMED_OUT" && current.state !== "CANCELLED") {
     finishActive(record.id);
@@ -237,7 +238,18 @@ export async function launchJob(
         // Keep the persisted record for startup recovery; do not turn a failed error-write into an unhandled rejection.
       }
     })
-    .finally(() => {
+    .finally(async () => {
+      if (controller.auditOperationId) {
+        try {
+          const finalRecord = await store.get(record.id);
+          const { appendJobAudit } = await import("./job-audit.js");
+          await appendJobAudit(options.profileDir, finalRecord, controller.auditOperationId);
+          await store.save({ ...finalRecord, auditState: "PERSISTED" });
+        } catch {
+          const latest = await store.get(record.id).catch(() => null);
+          if (latest) await store.save({ ...latest, auditState: "PENDING" }).catch(() => undefined);
+        }
+      }
       finishActive(record.id);
       emit({ job_id: record.id, attempt_id: attemptId, event: "CONTROLLER_SETTLED" });
     });

@@ -319,8 +319,9 @@ test("取消后并发 resume 只创建一个新 attempt", async () => {
     assert.equal(resumes[0].job_id, jobId);
     assert.equal(resumes[1].job_id, jobId);
     let resumedRecord = await store.get(jobId);
-    for (let i = 0; i < 100 && resumedRecord.attempts < 2; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    const resumedDeadline = Date.now() + 15_000;
+    while (Date.now() < resumedDeadline && resumedRecord.attempts < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
       resumedRecord = await store.get(jobId);
     }
     assert.equal(resumedRecord.attempts, 2);
