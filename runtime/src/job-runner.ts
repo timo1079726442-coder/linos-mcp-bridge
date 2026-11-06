@@ -11,6 +11,7 @@ export interface ActiveJobController {
   child: ChildProcess | null;
   cancelRequested: boolean;
   profileDir: string;
+  workspaceId: string;
   /** 本次 attempt 真正结束时 resolve；用于避免复用"正在清理"的旧控制器。 */
   settled: Promise<void>;
   attemptId: string;
@@ -28,6 +29,14 @@ function finishActive(id: string): void {
 
 export function isJobActive(jobId: string): boolean {
   return activeJobs.has(jobId);
+}
+
+export function countActiveJobs(profileDir: string, workspaceId: string): number {
+  const target = process.platform === "win32" ? path.resolve(profileDir).toLowerCase() : path.resolve(profileDir);
+  return [...activeJobs.values()].filter((controller) => {
+    const candidate = process.platform === "win32" ? path.resolve(controller.profileDir).toLowerCase() : path.resolve(controller.profileDir);
+    return candidate === target && controller.workspaceId === workspaceId;
+  }).length;
 }
 
 async function terminateChild(child: ChildProcess, pid: number | undefined): Promise<void> {
@@ -72,6 +81,12 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+export async function waitForActiveJobSettled(jobId: string, timeoutMs = 15_000): Promise<void> {
+  const controller = activeJobs.get(jobId);
+  if (!controller) return;
+  await withTimeout(controller.settled, timeoutMs);
 }
 
 export interface LaunchOptions {
@@ -165,6 +180,11 @@ export async function cancelActiveJob(store: JobStore, id: string, timeline?: Ti
     emit({ job_id: id, attempt_id: controller.attemptId, event: "CANCEL_SIGNAL_SENT", pid });
     await terminateChild(child, pid ?? undefined);
   }
+  try {
+    await withTimeout(controller.settled, 15_000);
+  } catch {
+    throw new Error("JOB_CANCEL_SETTLE_TIMEOUT");
+  }
   return store.get(id);
 }
 
@@ -193,29 +213,34 @@ export async function launchJob(
   let current = await store.get(record.id);
   let settle!: () => void;
   const settled = new Promise<void>((resolve) => { settle = resolve; });
-  const controller: ActiveJobController = { child: null, cancelRequested: current.cancelRequested, profileDir: options.profileDir, settled, settle, attemptId };
+  const controller: ActiveJobController = { child: null, cancelRequested: current.cancelRequested, profileDir: options.profileDir, workspaceId: options.workspaceId, settled, settle, attemptId };
   activeJobs.set(record.id, controller);
   if (current.state !== "QUEUED" && current.state !== "INTERRUPTED" && current.state !== "FAILED" && current.state !== "TIMED_OUT" && current.state !== "CANCELLED") {
     finishActive(record.id);
     throw new Error("JOB_NOT_RESUMABLE");
   }
-  void runJob(store, record.id, options, controller).catch(async (error: unknown) => {
-    try {
-      const latest = await store.get(record.id);
-      if (latest.state === "RUNNING" || latest.state === "QUEUED") {
-        await store.save({
-          ...latest,
-          state: "FAILED",
-          finishedAt: new Date().toISOString(),
-          errorCode: "JOB_RUNNER_FAILED",
-          errorMessage: redactString(error instanceof Error ? error.message : String(error)).slice(0, 500),
-          checkpoints: [...latest.checkpoints, { at: new Date().toISOString(), message: "failed to launch worker" }].slice(-100),
-        });
+  void runJob(store, record.id, options, controller)
+    .catch(async (error: unknown) => {
+      try {
+        const latest = await store.get(record.id);
+        if (latest.state === "RUNNING" || latest.state === "QUEUED") {
+          await store.save({
+            ...latest,
+            state: "FAILED",
+            finishedAt: new Date().toISOString(),
+            errorCode: "JOB_RUNNER_FAILED",
+            errorMessage: redactString(error instanceof Error ? error.message : String(error)).slice(0, 500),
+            checkpoints: [...latest.checkpoints, { at: new Date().toISOString(), message: "failed to launch worker" }].slice(-100),
+          });
+        }
+      } catch {
+        // Keep the persisted record for startup recovery; do not turn a failed error-write into an unhandled rejection.
       }
-    } finally {
+    })
+    .finally(() => {
       finishActive(record.id);
-    }
-  });
+      emit({ job_id: record.id, attempt_id: attemptId, event: "CONTROLLER_SETTLED" });
+    });
   return store.get(record.id);
 }
 
@@ -233,13 +258,13 @@ async function runJob(
   try {
     record = await store.get(id);
   } catch {
-    finishActive(id);
     return;
   }
   record = await store.save({
     ...record,
     attempts: record.attempts + 1,
     state: "RUNNING",
+    durationMs: 0,
     startedAt: record.startedAt ?? new Date().toISOString(),
     finishedAt: null,
     exitCode: null,
@@ -250,8 +275,11 @@ async function runJob(
     lastHeartbeatAt: new Date().toISOString(),
     checkpoints: [...record.checkpoints, { at: new Date().toISOString(), message: `attempt ${record.attempts + 1} started` }].slice(-100),
   });
+  let heartbeatStopped = false;
+  let heartbeatTask: Promise<void> | null = null;
   const heartbeat = setInterval(() => {
-    void (async () => {
+    if (heartbeatStopped || heartbeatTask) return;
+    heartbeatTask = (async () => {
       try {
         const latest = await store.get(id);
         // Never resurrect a terminal record: a stale heartbeat copy must not
@@ -265,7 +293,7 @@ async function runJob(
       } catch {
         /* best effort */
       }
-    })();
+    })().finally(() => { heartbeatTask = null; });
   }, 5000);
   let child: ChildProcess | null = null;
   let exitPromise: Promise<number | null> | null = null;
@@ -472,7 +500,9 @@ async function runJob(
     }
     throw error;
   } finally {
+    heartbeatStopped = true;
     clearInterval(heartbeat);
+    if (heartbeatTask) await heartbeatTask;
     const latest = await store.get(id).catch(() => null);
     if (latest && latest.state === "RUNNING") {
       await store.save({
@@ -481,7 +511,5 @@ async function runJob(
         lastHeartbeatAt: latest.lastHeartbeatAt ?? new Date().toISOString(),
       }).catch(() => undefined);
     }
-    finishActive(id);
-    emitRun({ job_id: id, attempt_id: attemptId, event: "CONTROLLER_SETTLED" });
   }
 }

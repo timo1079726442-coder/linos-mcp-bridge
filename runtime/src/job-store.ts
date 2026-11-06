@@ -112,7 +112,14 @@ const MAX_LOG_BYTES = 2 * 1024 * 1024;
 const LOG_TAIL_BYTES = 2 * 1024 * 1024;
 const MAX_JOB_FILES_SCANNED = 500;
 const WORKSPACE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const TERMINAL_STATES = new Set<JobState>(["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT", "INTERRUPTED"]);
 const saveTails = new Map<string, Promise<void>>();
+
+function laterTimestamp(left: string | null, right: string | null): string | null {
+  if (!left) return right;
+  if (!right) return left;
+  return Date.parse(left) >= Date.parse(right) ? left : right;
+}
 
 async function withJobSaveLock<T>(key: string, action: () => Promise<T>): Promise<T> {
   const previous = saveTails.get(key) ?? Promise.resolve();
@@ -267,23 +274,54 @@ export class JobStore {
       .slice(0, Math.max(1, Math.min(100, Math.floor(limit) || 50)));
   }
 
-  async save(record: JobRecord): Promise<JobRecord> {
+  async save(record: JobRecord, options: { allowTerminalResume?: boolean } = {}): Promise<JobRecord> {
     const file = jobFile(this.requireDir(), record.id);
     return withJobSaveLock(file, async () => {
       const attemptId = this.attemptIds.get(record.id) ?? String(record.attempts);
       const base = { job_id: record.id, attempt_id: attemptId };
       this.timeline?.({ ...base, event: "STORE_SAVE_BEGIN" });
       try {
-        // 取消是终态：同一 job 的 runner、取消工具与输出更新共享串行写锁。
+        // Terminal states cannot be resurrected by stale output/heartbeat snapshots.
+        // Only an explicit resume may transition a terminal record back to QUEUED.
         this.timeline?.({ ...base, event: "STORE_READ_BEGIN" });
         const existing = await this.get(record.id).catch(() => {
           this.timeline?.({ ...base, event: "STORE_READ_ERROR" });
           return null;
         });
         this.timeline?.({ ...base, event: "STORE_READ_END" });
-        const effective = existing?.state === "CANCELLED" && record.state !== "CANCELLED"
-          ? { ...record, state: "CANCELLED" as const, cancelRequested: true }
-          : record;
+        const explicitResume = options.allowTerminalResume === true && record.state === "QUEUED";
+        const newAttempt = Boolean(existing && record.state === "RUNNING" && record.attempts > existing.attempts);
+        let effective: JobRecord = record;
+        if (existing && TERMINAL_STATES.has(existing.state) && record.state !== existing.state && !explicitResume) {
+          effective = {
+            ...record,
+            state: existing.state,
+            cancelRequested: existing.cancelRequested,
+            timedOut: existing.timedOut,
+            finishedAt: existing.finishedAt,
+            exitCode: existing.exitCode,
+            errorCode: existing.errorCode,
+            errorMessage: existing.errorMessage,
+            resultSummary: existing.resultSummary,
+            history: existing.history,
+            checkpoints: existing.checkpoints,
+          };
+        }
+        if (existing) {
+          effective = {
+            ...effective,
+            attempts: Math.max(existing.attempts, effective.attempts),
+            outputBytes: Math.max(existing.outputBytes, effective.outputBytes),
+            truncatedOutput: existing.truncatedOutput || effective.truncatedOutput,
+            lastHeartbeatAt: laterTimestamp(existing.lastHeartbeatAt, effective.lastHeartbeatAt),
+            lastOutputAt: laterTimestamp(existing.lastOutputAt, effective.lastOutputAt),
+            ...(explicitResume || newAttempt ? {} : {
+              durationMs: Math.max(existing.durationMs, effective.durationMs),
+              cancelRequested: existing.cancelRequested || effective.cancelRequested,
+              timedOut: existing.timedOut || effective.timedOut,
+            }),
+          };
+        }
         const next: JobRecord = { ...effective, updatedAt: new Date().toISOString() };
         this.timeline?.({ ...base, event: "STORE_ATOMIC_WRITE_BEGIN" });
         await writeAtomicJson(file, next);
