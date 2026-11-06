@@ -1688,7 +1688,29 @@ function fetchHint(code: string): string {
     case "FETCH_CONTENT_TYPE_REJECTED":
       return "只允许文本/JSON/XML 类响应。";
     case "FETCH_TIMEOUT":
-      return "请求超时（10s）。";
+      return "请求超时（总预算 20s，所有重定向共享）。";
+    case "FETCH_CONNECT_TIMEOUT":
+      return "建立连接超时（5s）。";
+    case "FETCH_DNS_TIMEOUT":
+      return "域名解析超时（3s）。";
+    case "FETCH_DNS_EMPTY":
+    case "FETCH_DNS_INVALID_ADDRESS":
+    case "FETCH_DNS_FAILED":
+      return "域名解析失败或返回了不可用的地址。";
+    case "FETCH_TLS_FAILED":
+      return "TLS 证书校验失败；不会降级为不校验连接。";
+    case "FETCH_PEER_MISMATCH":
+      return "实际连接的对端地址与校验通过的地址不一致，已中止（可能为 DNS 重绑定攻击）。";
+    case "FETCH_LOOKUP_HOST_MISMATCH":
+      return "底层解析请求了非预期域名，已中止。";
+    case "FETCH_SCHEME_DOWNGRADE":
+      return "禁止从 https 重定向降级到 http。";
+    case "FETCH_PORT_NOT_ALLOWED":
+      return "该端口未被授权；仅允许默认端口，其它端口需管理员在白名单中显式开启。";
+    case "FETCH_REDIRECT_LOOP":
+      return "检测到重定向环，已中止。";
+    case "FETCH_CONTENT_ENCODING_REJECTED":
+      return "不支持压缩响应（只接受 identity 编码）。";
     case "FETCH_HTTP_ERROR":
       return "目标返回了非 2xx 状态。";
     case "FETCH_ALLOWLIST_INVALID":
