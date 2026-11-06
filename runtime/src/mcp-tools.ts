@@ -199,7 +199,7 @@ export const TOOL_INVENTORY: ReadonlyArray<{
   { name: "mysql_describe_table", conditional: true, group: "数据源", approval: "auto", enabled: false, description: "查看只读数据源中某张表的列、类型与键。" },
   { name: "mysql_query", conditional: true, group: "数据源", approval: "manual", enabled: false, description: "执行一条只读 SQL（单条 SELECT/SHOW/EXPLAIN），有行数/超时/字节上限。" },
   { name: "search", conditional: false, group: "搜索", approval: "auto", description: "search_workspace 的兼容别名：按关键字搜索工作区内容。" },
-  { name: "fetch", conditional: false, group: "联网", approval: "auto", description: "只读 GET 一个白名单域名下的文本 URL（https、10s 超时、1MB 上限、逐跳校验）。" },
+  { name: "fetch", conditional: false, group: "联网", approval: "auto", description: "只读 GET 一个白名单域名下的文本 URL（https、20s 总预算、1MB 上限、逐跳重新解析并固定 IP、禁止 https→http 降级）。" },
   { name: "get_mcp_app_settings", conditional: false, group: "设置", approval: "auto", description: "返回这个 MCP 服务给 ChatGPT 用的连接器配置（名称、说明、URL、认证方式、工具数）。" },
   { name: "verify_tool_registered", conditional: false, group: "自检", approval: "auto", description: "核验某个工具是否注册、是否条件工具，以及当前开关与审批方式。" },
   { name: "screen_list_windows", conditional: false, group: "屏幕", description: "列出当前桌面上的可见窗口标题与编号；不抓取画面内容。" },
@@ -1384,10 +1384,10 @@ async function dispatchMcpInner(
           },
           {
             name: "fetch",
-            description: "只读 GET 一个白名单域名下的文本 URL；不支持自定义方法/请求头，逐跳校验、10s 超时、1MB 上限。",
+            description: "只读 GET 一个白名单域名下的文本 URL；不支持自定义方法/请求头/端口，逐跳重新解析并固定 IP、禁止 https→http 降级、20s 总预算、1MB 上限。",
             inputSchema: objectSchema(
               {
-                url: { type: "string", description: "https URL；域名必须已加入当前工作区的 fetch 白名单" },
+                url: { type: "string", description: "https URL；域名必须已加入当前工作区的 fetch 白名单；端口只能是默认端口或在白名单 allow_ports 中授权" },
                 max_bytes: { type: "integer", minimum: 1024, maximum: 1048576 },
               },
               ["url"],

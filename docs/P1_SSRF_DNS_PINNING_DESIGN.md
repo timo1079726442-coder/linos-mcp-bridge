@@ -1,9 +1,11 @@
 # P1 安全方案：SSRF 的 DNS TOCTOU 修复（校验 IP 与实际连接 IP 绑定）
 
-- 状态：**已审查定稿（Approved）· Q1–Q6 已决策 · 进入 S1–S4 实施**
-- 分支：`release/v0.1.1-hardening`（本地，未推送、未合并）
-- 关联：`runtime/src/fetch-tool.ts`、`runtime/test/fetch-tool.test.js`、`runtime/src/mcp-tools.ts`
+- 状态：**已实施完成（S1–S4，本地提交，未推送）** · Q1–Q6 已决策 · 约束 M1–M4 已落地
+- 分支：`release/v0.1.1-hardening`（未推送、未合并）
+- 实施提交：`daf42bd`(S1) · `43930dc`(S2) · `a779bf6`(S3) · S4 随文档一并提交
+- 关联：`runtime/src/fetch-tool.ts`、`runtime/src/net/*`、`runtime/test/{address-policy,ssrf-pinning,fetch-tool,fetch-tool-contract}.test.js`
 - 运行时事实：打包产物由 Electron `33.4.11` 以 `ELECTRON_RUN_AS_NODE=1` 启动，内嵌 **Node 20.18.3**（已本机实测）
+- 验证：runtime 全量 **154/154 通过**；审计专项 12/12；地址矩阵 7/7；固定绑定 11/11；fetch 行为 14/14；契约 2/2
 - 发布阻断项提醒：**Windows 审计目录 `FILE_SYNC_ONLY` 仍未解决**，本方案不改变该阻断状态
 
 ---
@@ -628,7 +630,7 @@ IPv6：`::`、`::1`、`::ffff:127.0.0.1`、`::ffff:7f00:1`、`::127.0.0.1`（v4-
 | P0 后台任务恢复 | ✅ 代码已提交（`e2ae906`）；**最终代码仍需 10 轮稳定性验证** |
 | P0 审计持久化 | ✅ 代码已提交（`04c2d80`），126/126 runtime + 415 root + typecheck 通过 |
 | **Windows 审计目录持久性** | ❌ **阻断**：`fsync(directory)` 在 Windows 返回 `EPERM`，当前仅 `FILE_SYNC_ONLY`；未解决前不得发布 |
-| P1 SSRF（本文） | 🔧 已批准，按 S1–S4 实施中；须完成 §8 全部用例 |
+| P1 SSRF（本文） | ✅ 已实施（S1–S4 本地提交）：地址矩阵 7/7、绑定证明 11/11、fetch 行为 14/14、契约 2/2，runtime 全量 154/154 |
 | 内部品牌清理 / Gitleaks / CodeQL / SBOM / 干净 Windows 安装 | ❌ 未开始 |
 
 **执行边界：S1–S4 在 `release/v0.1.1-hardening` 独立进行；不合并 `main`、不推送、不发布 v0.1.1。**

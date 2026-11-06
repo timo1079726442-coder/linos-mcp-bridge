@@ -64,13 +64,17 @@
 4. 请求头只发送 `accept`，**不转发 Authorization / Cookie**，跨域重定向不存在敏感头泄漏；
 5. 重定向后仍限制 `MAX_REDIRECTS`，且只允许白名单域名。
 
-### 开放问题（HIGH，未解决）
-- **TOCTOU**：`assertPublicResolution()` 解析出的 IP **没有被复用**；随后 `fetch()` 会再次解析 DNS。检查与实际连接之间存在时间窗，攻击者可用短 TTL 在两次解析之间把域名切到内网地址。
-- 影响范围：仅 `fetch` 工具（需要管理员把域名加入白名单），但**不能宣称 DNS Rebinding 已完全解决**。
-- 正确修法（M7 或 M6b）：把校验结果绑定到实际连接——用 `undici` Agent 的自定义 `lookup`，或自建 `https.request` 并显式传入已校验 IP + `servername`（保 SNI/证书校验）。需要配套测试：TTL=0 切换、A/AAAA 混合、IPv4-mapped。
+### 已解决的开放问题（原 HIGH）
+
+- **TOCTOU（DNS Rebinding）**：已在 v0.1.1 加固分支修复（S1–S4）。
+  - 旧实现：`assertPublicResolution()` 解析出的 IP 没有被复用，随后 `fetch()` 再次解析 DNS，两次解析之间存在可被短 TTL 利用的时间窗。
+  - 新实现：每跳只解析一次（`net/resolver.ts`），结果直接交给 `https.request` 的自定义 `lookup`（`net/pinned-transport.ts`），底层不存在第二次解析；连接建立后比较 `socket.remoteAddress` 与已校验地址（规范化比较），不一致立即 `FETCH_PEER_MISMATCH` 中止。
+  - 同时收紧：地址判定改为"仅全局单播"（默认拒绝）、任一条 DNS 答案不合规即整体拒绝、空答案拒绝、`agent:false` 禁止连接复用、禁止 `https → http` 降级、端口仅允许默认或管理员授权、拒绝压缩响应、全局 20s 预算（不按跳重置）。
+  - 证据：`runtime/test/address-policy.test.js`（地址矩阵）、`runtime/test/ssrf-pinning.test.js`（含"域名在 DNS 中不存在仍能连接"证明无二次解析、对端不一致必须失败）、`runtime/test/fetch-tool.test.js`（重定向/端口/降级/编码/预算/大小）。
+  - 设计文档：`docs/P1_SSRF_DNS_PINNING_DESIGN.md`。
 
 ### 文档修正
-`SECURITY.md` 不再写"已完全防护 DNS rebinding"，改为"已做解析后校验，连接绑定待 M7 完成"。
+`SECURITY.md` 不再写"已完全防护 DNS rebinding"，改为"已做解析后校验，连接绑定待 M7 完成"；v0.1.1 加固后应更新为"校验地址已绑定到实际连接（附上述测试证据）"。
 
 ## 6. 附带修复的运行时缺陷（发现于干净环境测试）
 
