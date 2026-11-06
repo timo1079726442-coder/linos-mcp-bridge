@@ -1,5 +1,5 @@
 import dns from "node:dns/promises";
-/**
+import { FetchError } from "./net/fetch-error.js";/**
  * fetch — 受白名单约束的只读网络读取。
  *
  * 约束：
@@ -20,12 +20,7 @@ export interface FetchAllowlist {
   file: string | null;
 }
 
-export class FetchError extends Error {
-  constructor(readonly code: string) {
-    super(code);
-    this.name = "FetchError";
-  }
-}
+export { FetchError } from "./net/fetch-error.js";
 
 const MAX_URL_LENGTH = 2_000;
 const MAX_BYTES = 1024 * 1024;
