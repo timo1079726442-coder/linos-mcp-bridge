@@ -2,29 +2,133 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  verify:
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+
+      - name: Install (app)
+        run: npm ci
+
+      - name: Install (runtime)
+        run: npm --prefix runtime ci
+
+      - name: Build runtime
+        run: npm run build:runtime
+
+      - name: Build app
+        run: npm run build
+
+      - name: Typecheck (main/preload/renderer)
+        run: npm run typecheck
+
+      # 基线：0 error / 275 warning。先把"新增 error"挡住，warning 逐步收敛。
+      - name: Lint
+        run: npm run lint
+
+      - name: App tests
+        run: npm test
+
+      # 禁止重试掩盖：runtime 全量测试必须一次通过。
+      # 本地已验证连续 10 轮 154/154 全绿（docs/RELEASE_ENGINEERING.md §1）。
+      - name: Runtime tests
+        run: npm --prefix runtime test
+
+  security:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 全历史扫描：必须拉全部提交与 tag
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # 官方密钥扫描：全分支 + 全 tag + 全提交
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: ${{ github.workspace }}\.gitleaks.toml
+
+      # 本地等价扫描作为独立第二道（规则集不同，互补）
+      - name: Secret scan (local rules)
+        run: node scripts/secret-scan.mjs
+
+      - name: Install (app)
+        run: npm ci
+
+      - name: Install (runtime)
+        run: npm --prefix runtime ci
+
+      # 只对"会进入发行包"的依赖做拦截；dev 依赖漏洞登记在 docs/DEPENDENCY_AUDIT.md
+      - name: Audit runtime (prod, high+)
+        run: npm --prefix runtime audit --omit=dev --audit-level=high
+
+      - name: Audit app (prod, high+)
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: SBOM (license completeness)
+        run: node scripts/generate-sbom.mjs --check
+
+  package:
+    # 只在打 tag 或手动触发时跑：需要下载 Electron，耗时且占空间
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    needs: [verify, security]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
       - run: npm ci
-      - run: npm run build:runtime
-      - run: npm run build
-      - run: npm run typecheck
-      # 基线：当前 0 error / 265 warning，先把"新增错误"挡住，逐步收敛 warning
-      - run: npm run lint
-      - run: npm test
-      # runtime 里有若干依赖真实进程时序的用例（后台任务输出/取消），CI 机器较慢时会偶发失败。
-      # 第一次失败自动重跑一次；仍失败才算真失败。
-      - id: runtime-test
-        run: npm --prefix runtime test
-        continue-on-error: true
-      - if: steps.runtime-test.outcome == 'failure'
-        run: npm --prefix runtime test
+      - run: npm --prefix runtime ci
+      - run: npm run build:portable
+
+      - name: Static package gate
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem release-portable\*.zip | Select-Object -First 1
+          powershell -ExecutionPolicy Bypass -File scripts\verify-portable-assets.ps1 `
+            -ZipPath $zip.FullName -DestDir "$env:RUNNER_TEMP\portable-check"
+
+      - name: SBOM + checksums
+        shell: pwsh
+        run: |
+          node scripts/generate-sbom.mjs
+          $zip = Get-ChildItem release-portable\*.zip | Select-Object -First 1
+          $hash = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($zip.Name)" | Set-Content dist-release\SHA256SUMS.txt -Encoding ascii
+          Get-Content dist-release\SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-package
+          path: |
+            release-portable/*.zip
+            dist-release/sbom.json
+            dist-release/sbom-summary.json
+            dist-release/SHA256SUMS.txt
+          retention-days: 14

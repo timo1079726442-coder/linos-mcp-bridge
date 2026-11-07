@@ -1,0 +1,42 @@
+# gitleaks 配置（全历史扫描用）
+# 目标：官方规则集为主，只对本仓库的**测试夹具**做精确放行，禁止宽泛通配。
+#
+# 放行原则：
+#   1) 只放行能明确指认为夹具的值（dead-token / stale-token / a-strong-password ...）；
+#   2) 任何真实凭据命中都必须轮换并从历史清除，不能加白名单了事。
+
+title = "linos-mcp-bridge"
+
+[extend]
+# 使用 gitleaks 内置默认规则集
+useDefault = true
+
+[allowlist]
+description = "Repo-specific test fixtures and placeholders"
+
+# 测试夹具：失效锁、陈旧锁、脱敏验证、拒绝路径
+paths = [
+  '''runtime/test/.*''',
+]
+
+regexes = [
+  # 占位符 / 示例
+  '''c2c_api_\.\.\.''',
+  '''c2c_api_\{\{?''',
+  '''example\.com''',
+  '''mcp-preview\.example\.com''',
+  '''<[A-Z_]{3,}>''',
+  '''x{8,}''',
+  # 明确的夹具字面量（不是真实凭据）
+  '''dead-token''',
+  '''stale-token''',
+  '''c2c_at_inner_token_xyz''',
+  '''a-strong-password''',
+  '''must not be accepted''',
+]
+
+# 文档中的说明性片段
+stopwords = [
+  "placeholder",
+  "redacted",
+]

@@ -289,6 +289,12 @@ async function runJob(
   });
   let heartbeatStopped = false;
   let heartbeatTask: Promise<void> | null = null;
+  /** 等待当前心跳写入结束（若没有在途心跳则立即返回）。 */
+  async function drainHeartbeat(): Promise<void> {
+    const pending: Promise<void> | null = heartbeatTask;
+    if (pending === null) return;
+    await pending;
+  }
   const heartbeat = setInterval(() => {
     if (heartbeatStopped || heartbeatTask) return;
     heartbeatTask = (async () => {
@@ -514,7 +520,7 @@ async function runJob(
   } finally {
     heartbeatStopped = true;
     clearInterval(heartbeat);
-    if (heartbeatTask) await heartbeatTask;
+    await drainHeartbeat();
     const latest = await store.get(id).catch(() => null);
     if (latest && latest.state === "RUNNING") {
       await store.save({
