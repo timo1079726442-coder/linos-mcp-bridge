@@ -201,10 +201,12 @@ test("legacy v0.1.0 audit journal remains verifiable and untouched", async () =>
 test("workspace audit journal persists intent/execution/result with durability receipt", async () => {
   const profile = await mkdtemp(path.join(os.tmpdir(), "audit-journal-state-"));
   const workspace = "workspace_state";
+  // 期望值是"实测能力"而不是"声称能力"：win32 上目录项 fsync 不可用。
+  const expectedDurability = process.platform === "win32" ? "FILE_SYNC_ONLY" : "FILE_AND_DIRECTORY_SYNC";
   try {
     const intent = await appendToolAuditIntent(profile, workspace, { tool: "git_commit", command: "git commit -m release", clientId: "client-state" }, "operation-state-1");
     assert.equal(intent.seq, 1);
-    assert.ok(["FILE_AND_DIRECTORY_SYNC", "FILE_SYNC_ONLY"].includes(intent.durability));
+    assert.equal(intent.durability, expectedDurability, "append 回执必须如实报告平台能力");
     const started = await appendToolAuditExecutionStarted(profile, workspace, { tool: "start_job", ok: true }, "operation-state-1");
     assert.equal(started.seq, 2);
     const result = await appendToolAuditResult(profile, workspace, { tool: "git_commit", ok: true, durationMs: 21 }, "operation-state-1");
@@ -213,6 +215,9 @@ test("workspace audit journal persists intent/execution/result with durability r
     assert.equal(verification.ok, true);
     assert.equal(verification.entries, 3);
     assert.deepEqual(verification.pendingOperations, []);
+    // 发布门禁项：verify 必须公开与回执一致的持久化等级，禁止把降级说成完整持久化。
+    assert.equal(verification.durability, expectedDurability);
+    assert.equal(verification.platform, process.platform);
     assert.notEqual(toolAuditPath(profile, workspace), toolAuditPath(profile, "workspace_other"));
   } finally {
     await rm(profile, { recursive: true, force: true });

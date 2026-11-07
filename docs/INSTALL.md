@@ -124,6 +124,19 @@ powershell -ExecutionPolicy Bypass -File .\scripts\tunnel-named.ps1 -Domain mcp.
 | 工具报 `PATH_OUTSIDE_WORKSPACE` | 目标路径在工作区外 | 换工作区，或把文件放进工作区 |
 | ChatGPT 连上但工具为空 | 公网 `/mcp` 未通过 OAuth，或 URL 少了 `/mcp` | 检查 URL 与授权 |
 | 临时隧道域名每次变 | trycloudflare 特性 | 改用命名隧道（方案 C） |
+| 工具报 `FETCH_PORT_NOT_ALLOWED` | 目标是非默认端口，未授权 | 在白名单 `fetch-allowlist.json` 的 `allow_ports` 里显式加端口（默认 443/80 始终允许） |
+| 工具报 `FETCH_SCHEME_DOWNGRADE` | 站点把 https 重定向到 http | 改用 https 地址；该降级被有意禁止 |
+| 工具报 `FETCH_PEER_MISMATCH` | 实际连接的对端与校验通过的 IP 不一致 | 视作可疑：检查该域名解析是否被劫持/重绑定，不要放宽限制 |
+| 工具报 `FETCH_CONTENT_ENCODING_REJECTED` | 站点返回了 gzip 等压缩响应 | 该工具只接受未压缩文本；改用提供原始内容的接口 |
+
+---
+
+## 6.1 审计日志能查到什么、持久性到什么程度
+
+- 审计写入 `<profile>/audit/<workspaceId>.journal.jsonl`，逐条 `seq` + `length` + `crc32` + SHA-256 链；
+- 校验入口：`GET /admin/tool-audit`（需 admin 令牌），返回 `ok` / `entries` / `pendingOperations` / `durability` / `platform`；
+- **Windows 上的持久化等级是 `FILE_SYNC_ONLY`**：文件内容会 `fsync`，但目录项无法同步（Node 在 Windows 上对目录 `fsync` 返回 `EPERM`）。Linux/macOS 为 `FILE_AND_DIRECTORY_SYNC`；
+- 这不影响"篡改可被发现"和"审计不可写时高风险操作拒绝执行"，但**不要**对外宣称 Windows 具备目录项级持久性。
 
 ---
 

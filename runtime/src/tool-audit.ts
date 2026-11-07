@@ -257,6 +257,16 @@ async function verifyLegacyToolAudit(profileDir: string): Promise<Record<string,
   return { ok: true, entries: lines.length };
 }
 
+/**
+ * 当前平台实际能达到的持久化等级（与 audit-journal-worker 的 append 回执一致）：
+ * - win32：目录项 `fsync` 不可用（Node 返回 EPERM），只有文件级 sync → FILE_SYNC_ONLY；
+ * - 其他平台：文件 + 目录项都同步 → FILE_AND_DIRECTORY_SYNC。
+ * 该字段对外公布，避免把降级能力宣传成完整持久化。
+ */
+export function auditDurability(): "FILE_AND_DIRECTORY_SYNC" | "FILE_SYNC_ONLY" {
+  return process.platform === "win32" ? "FILE_SYNC_ONLY" : "FILE_AND_DIRECTORY_SYNC";
+}
+
 export async function verifyToolAudit(profileDir: string, workspaceId?: string): Promise<Record<string, unknown>> {
   const auditDir = path.join(profileDir, "audit");
   const current = workspaceId
@@ -271,6 +281,9 @@ export async function verifyToolAudit(profileDir: string, workspaceId?: string):
     entries: Number(current.entries ?? 0) + Number(legacy.entries ?? 0),
     pendingOperations: currentPending,
     legacy,
+    /** 实测能力，不是声称能力：Windows 上为 FILE_SYNC_ONLY。 */
+    durability: auditDurability(),
+    platform: process.platform,
     ...(current.ok === true && legacyBroken ? { brokenAt: legacy.brokenAt, errorCode: legacy.errorCode } : {}),
   };
 }
