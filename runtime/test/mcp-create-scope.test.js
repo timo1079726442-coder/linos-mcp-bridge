@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { startServer } from "../dist/server.js";
@@ -10,7 +10,14 @@ import { hashSecret, tokenStore } from "../dist/oauth-store.js";
 test("/mcp 的 create_file 是真实工具，受 workspace.write 约束", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "c2c-mcp-create-scope-"));
   const workspaceRoot = path.join(temp, "workspace");
+  const profileDir = path.join(temp, "profile");
   await mkdir(workspaceRoot);
+  await mkdir(profileDir);
+  await writeFile(path.join(profileDir, "tool-policy.json"), JSON.stringify({ version: 1, tools: {
+    create_file: { enabled: true, approval: "auto" },
+    update_file: { enabled: true, approval: "auto" },
+    write_file: { enabled: true, approval: "auto" },
+  } }), "utf8");
   const workspace = await detectWorkspace(workspaceRoot);
   const secret = Buffer.from("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "hex");
   const identity = {
@@ -47,6 +54,7 @@ test("/mcp 的 create_file 是真实工具，受 workspace.write 约束", async 
     handle = await startServer({
       identity,
       secret,
+      executionStorePath: path.join(profileDir, "execution-records.jsonl"),
       oauth: { requireIntent: false },
       createIntentBridge: {
         async requestCreateIntent(request) {

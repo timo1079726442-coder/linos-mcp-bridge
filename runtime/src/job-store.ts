@@ -26,6 +26,7 @@ export interface JobSpec {
   clientId: string;
   workspaceId: string;
   idempotencyKey?: string;
+  auditOperationId?: string;
   mode?: "user" | "constrained";
   message?: string;
   allowEmpty?: boolean;
@@ -65,6 +66,7 @@ export interface JobRecord {
   lastOutputAt: string | null;
   checkpoints: JobCheckpoint[];
   resultSummary?: string;
+  auditState?: "PERSISTED" | "PENDING";
   createdAt: string;
   updatedAt: string;
   startedAt: string | null;
@@ -83,6 +85,7 @@ export interface JobStartInput {
   cwdDisplay: string;
   timeoutMs: number;
   idempotencyKey?: string;
+  auditOperationId?: string;
   mode?: "user" | "constrained";
   message?: string;
   allowEmpty?: boolean;
@@ -104,6 +107,7 @@ export interface JobStatus {
   last_output_at: string | null;
   progress: string;
   error_code?: string;
+  audit_state?: "PERSISTED" | "PENDING" | null;
   finished_at: string | null;
 }
 
@@ -112,6 +116,29 @@ const MAX_LOG_BYTES = 2 * 1024 * 1024;
 const LOG_TAIL_BYTES = 2 * 1024 * 1024;
 const MAX_JOB_FILES_SCANNED = 500;
 const WORKSPACE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const TERMINAL_STATES = new Set<JobState>(["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT", "INTERRUPTED"]);
+const saveTails = new Map<string, Promise<void>>();
+
+function laterTimestamp(left: string | null, right: string | null): string | null {
+  if (!left) return right;
+  if (!right) return left;
+  return Date.parse(left) >= Date.parse(right) ? left : right;
+}
+
+async function withJobSaveLock<T>(key: string, action: () => Promise<T>): Promise<T> {
+  const previous = saveTails.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  const tail = previous.then(() => current, () => current);
+  saveTails.set(key, tail);
+  await previous.catch(() => undefined);
+  try {
+    return await action();
+  } finally {
+    release();
+    if (saveTails.get(key) === tail) saveTails.delete(key);
+  }
+}
 
 function isRecord(value: unknown): value is JobRecord {
   if (!value || typeof value !== "object") return false;
@@ -140,10 +167,24 @@ function logFile(dir: string, id: string): string {
 export class JobStore {
   private readonly directory: string | null;
   private readonly workspaceId: string;
+  /** 诊断用（仅测试注入）；生产为 undefined，不写任何文件。 */
+  private readonly timeline?: (event: import("./job-timeline.js").TimelineEvent) => void;
+  /** job_id → 当前 attempt 的诊断 ID（由 runner 登记，保证同一执行事件同 ID）。 */
+  private readonly attemptIds = new Map<string, string>();
 
-  constructor(profileDir: string | null, workspaceId: string) {
+  constructor(
+    profileDir: string | null,
+    workspaceId: string,
+    timeline?: (event: import("./job-timeline.js").TimelineEvent) => void,
+  ) {
     this.workspaceId = safeWorkspaceId(workspaceId);
     this.directory = profileDir ? path.join(profileDir, "jobs", this.workspaceId) : null;
+    this.timeline = timeline;
+  }
+
+  /** 诊断用：登记本次执行的 attempt_id（仅测试链路会调用）。 */
+  noteAttempt(jobId: string, attemptId: string): void {
+    this.attemptIds.set(jobId, attemptId);
   }
 
   private requireDir(): string {
@@ -180,6 +221,7 @@ export class JobStore {
         clientId: input.clientId,
         workspaceId: this.workspaceId,
         ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+        ...(input.auditOperationId ? { auditOperationId: input.auditOperationId } : {}),
         ...(input.mode ? { mode: input.mode } : {}),
         ...(input.message ? { message: input.message.slice(0, 500) } : {}),
         ...(input.allowEmpty !== undefined ? { allowEmpty: input.allowEmpty } : {}),
@@ -198,6 +240,7 @@ export class JobStore {
       lastHeartbeatAt: null,
       lastOutputAt: null,
       checkpoints: [{ at: now, message: "queued" }],
+      ...(input.auditOperationId ? { auditState: "PENDING" as const } : {}),
       createdAt: now,
       updatedAt: now,
       startedAt: null,
@@ -237,15 +280,68 @@ export class JobStore {
       .slice(0, Math.max(1, Math.min(100, Math.floor(limit) || 50)));
   }
 
-  async save(record: JobRecord): Promise<JobRecord> {
-    // 取消是终态：并发写入时（runner 回写 vs cancel 落盘）不允许被覆盖回 RUNNING/FAILED。
-    const existing = await this.get(record.id).catch(() => null);
-    const effective = existing?.state === "CANCELLED" && record.state !== "CANCELLED"
-      ? { ...record, state: "CANCELLED" as const, cancelRequested: true }
-      : record;
-    const next: JobRecord = { ...effective, updatedAt: new Date().toISOString() };
-    await writeAtomicJson(jobFile(this.requireDir(), record.id), next);
-    return next;
+  async save(record: JobRecord, options: { allowTerminalResume?: boolean } = {}): Promise<JobRecord> {
+    const file = jobFile(this.requireDir(), record.id);
+    return withJobSaveLock(file, async () => {
+      const attemptId = this.attemptIds.get(record.id) ?? String(record.attempts);
+      const base = { job_id: record.id, attempt_id: attemptId };
+      this.timeline?.({ ...base, event: "STORE_SAVE_BEGIN" });
+      try {
+        // Terminal states cannot be resurrected by stale output/heartbeat snapshots.
+        // Only an explicit resume may transition a terminal record back to QUEUED.
+        this.timeline?.({ ...base, event: "STORE_READ_BEGIN" });
+        const existing = await this.get(record.id).catch(() => {
+          this.timeline?.({ ...base, event: "STORE_READ_ERROR" });
+          return null;
+        });
+        this.timeline?.({ ...base, event: "STORE_READ_END" });
+        const explicitResume = options.allowTerminalResume === true && record.state === "QUEUED";
+        const newAttempt = Boolean(existing && record.state === "RUNNING" && record.attempts > existing.attempts);
+        let effective: JobRecord = record;
+        if (existing && TERMINAL_STATES.has(existing.state) && record.state !== existing.state && !explicitResume) {
+          effective = {
+            ...record,
+            state: existing.state,
+            cancelRequested: existing.cancelRequested,
+            timedOut: existing.timedOut,
+            finishedAt: existing.finishedAt,
+            exitCode: existing.exitCode,
+            errorCode: existing.errorCode,
+            errorMessage: existing.errorMessage,
+            resultSummary: existing.resultSummary,
+            history: existing.history,
+            checkpoints: existing.checkpoints,
+          };
+        }
+        if (existing) {
+          effective = {
+            ...effective,
+            attempts: Math.max(existing.attempts, effective.attempts),
+            outputBytes: Math.max(existing.outputBytes, effective.outputBytes),
+            truncatedOutput: existing.truncatedOutput || effective.truncatedOutput,
+            lastHeartbeatAt: laterTimestamp(existing.lastHeartbeatAt, effective.lastHeartbeatAt),
+            lastOutputAt: laterTimestamp(existing.lastOutputAt, effective.lastOutputAt),
+            auditState: explicitResume || newAttempt
+              ? effective.auditState
+              : existing.auditState === "PERSISTED" ? "PERSISTED" : effective.auditState ?? existing.auditState,
+            ...(explicitResume || newAttempt ? {} : {
+              durationMs: Math.max(existing.durationMs, effective.durationMs),
+              cancelRequested: existing.cancelRequested || effective.cancelRequested,
+              timedOut: existing.timedOut || effective.timedOut,
+            }),
+          };
+        }
+        const next: JobRecord = { ...effective, updatedAt: new Date().toISOString() };
+        this.timeline?.({ ...base, event: "STORE_ATOMIC_WRITE_BEGIN" });
+        await writeAtomicJson(file, next);
+        this.timeline?.({ ...base, event: "STORE_ATOMIC_WRITE_END" });
+        this.timeline?.({ ...base, event: "STORE_SAVE_END" });
+        return next;
+      } catch (error) {
+        this.timeline?.({ ...base, event: "STORE_SAVE_ERROR" });
+        throw error;
+      }
+    });
   }
 
   async findActiveByIdempotencyKey(input: { clientId: string; idempotencyKey: string }): Promise<JobRecord | null> {
@@ -351,6 +447,7 @@ export class JobStore {
       last_output_at: record.lastOutputAt,
       progress,
       ...(record.errorCode ? { errorCode: record.errorCode } : {}),
+      audit_state: record.auditState ?? null,
       finished_at: record.finishedAt,
     };
   }

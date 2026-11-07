@@ -66,6 +66,17 @@ M7 要求：高风险操作在执行前，审计意图必须获得**持久化确
 | 直接升级 Electron 到 37+ | 属独立升级项（ABI/原生依赖/打包/CI 全需重验），不与 M7 混做 |
 | 纯内存队列 | 不满足持久化确认 |
 
+## v0.1.1 implementation status (2026-11-06)
+
+- Runtime audit writes now use a Worker-backed per-workspace journal, an `O_EXCL` lock with stale-owner recovery, contiguous `seq`, record length + CRC32 + SHA-256 chain validation, and file `sync()` before acknowledging persistence.
+- High-risk MCP calls persist `INTENT_DURABLE` before dispatch; command/write/Git/job failures before intent return `AUDIT_UNAVAILABLE` without running the effect. Read-only calls expose `_meta.auditState` as `PERSISTED` or `PENDING`. Background job attempts link their terminal `RESULT_DURABLE` to the persisted operation ID. Legacy `tool-calls.jsonl` is left untouched and verified read-only.
+- **Windows durability limitation — 已达成的决定（B 方案，2026-11-07）：** 在 Windows/Node 20.18.3 与 24.x 上实测：`fsync(file)` 成功，`fsync(directory)` 返回 `EPERM`。按"不引入原生模块、保持绿色免安装"的既有决策，**不引入 Win32 辅助**；Windows 如实报告 `FILE_SYNC_ONLY`，POSIX 报告 `FILE_AND_DIRECTORY_SYNC`。
+  - 该边界**已机器校验**：`verifyToolAudit()` 返回 `durability` 与 `platform`，`GET /admin/tool-audit` 可直接查询；`runtime/test/tool-audit.test.js` 断言追加回执与 verify 输出都等于平台实测等级（Windows 上必须是 `FILE_SYNC_ONLY`），任何人都无法把它改成"完整持久化"。
+  - 对外口径：`SECURITY.md`「已知的设计取舍」第 6 条、`docs/INSTALL.md` 审计一节均写明降级事实；发布说明不得声称 Windows 具备目录项持久性。
+  - 若将来要求与 POSIX 同等持久性，唯一路径是引入最小 Win32 辅助（`FlushFileBuffers` 目录项），届时需要重新验证 ABI、构建、代码签名与免安装形态，因此作为**独立大版本议题**，不阻塞本次发布。
+  - 审计的核心保证（哈希链可校验、失败关闭、无重放）**不依赖**目录项 fsync，因此该降级不削弱"能否发现篡改/是否拒绝无审计执行"这两项。
+- Targeted audit suite: 12 passed (含 Windows 持久化等级断言). Full runtime suite after integration: 154 passed. Clean-package/Windows release verification remains pending.
+
 ## Electron 升级（独立跟踪）
 
 M7 完成后单独立项 `33 → 37 (Node 22)`；届时可把日志后端换成 `node:sqlite`，队列/状态机/去重语义不变。

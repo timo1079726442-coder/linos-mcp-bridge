@@ -1,37 +1,52 @@
-import dns from "node:dns/promises";
 /**
- * fetch — 受白名单约束的只读网络读取。
+ * fetch — 受白名单约束的只读网络读取（SSRF 加固版）。
  *
  * 约束：
  * - 只允许 GET；目标域名必须写在 `<profile>/workspaces/<workspaceId>/fetch-allowlist.json`
  *   （兼容旧的 `<profile>/fetch-allowlist.json`），文件不存在或为空 = 完全禁止；
- * - 默认只允许 https；`allow_http` 明确打开才允许 http；
- * - 拒绝 IP 字面量、localhost、URL 内嵌账号密码；
- * - 手动处理重定向，每一跳都重新校验白名单（最多 3 跳）；
- * - 10s 超时、1MB 响应上限、仅文本类 content-type、正文截断到 20 万字符。
+ * - 默认只允许 https；`allow_http` 明确打开才允许 http；**https 不得降级到 http**；
+ * - 拒绝 IP 字面量、localhost、URL 内嵌账号密码；端口只允许默认端口或管理员显式授权；
+ * - 每一跳都重新"解析 → 全量公网判定 → 固定 IP → 连接 → 核对对端地址"，最多 3 跳；
+ * - 全局共享一个截止时间（不按跳重置）；DNS 3s、连接 5s、总预算 20s；
+ * - 1MB 响应上限、仅文本类 content-type、拒绝压缩编码、正文截断到 20 万字符。
  */
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
+import { FetchError } from "./net/fetch-error.js";
+import { resolvePinnedTarget, type PinnedTarget, type ResolveOptions } from "./net/resolver.js";
+import {
+  DEFAULT_CONNECT_TIMEOUT_MS,
+  requestPinned,
+  type PinnedRequestOptions,
+  type PinnedResponse,
+} from "./net/pinned-transport.js";
+
+export { FetchError } from "./net/fetch-error.js";
 
 export interface FetchAllowlist {
   domains: string[];
   allowHttp: boolean;
+  /** 管理员显式授权的非默认端口（M4：只来自控制面配置文件）。 */
+  allowPorts: number[];
   source: "workspace" | "profile" | "default";
   file: string | null;
 }
 
-export class FetchError extends Error {
-  constructor(readonly code: string) {
-    super(code);
-    this.name = "FetchError";
-  }
+/** 测试注入点：生产不传，使用真实解析与传输。 */
+export interface FetchDeps {
+  resolve?: (hostname: string, options?: ResolveOptions) => Promise<PinnedTarget>;
+  request?: (options: PinnedRequestOptions) => Promise<PinnedResponse>;
 }
 
 const MAX_URL_LENGTH = 2_000;
 const MAX_BYTES = 1024 * 1024;
 const MAX_TEXT_CHARS = 200_000;
 const MAX_REDIRECTS = 3;
-const TIMEOUT_MS = 10_000;
+const TOTAL_BUDGET_MS = 20_000;
+const DNS_TIMEOUT_MS = 3_000;
+const CONNECT_TIMEOUT_MS = DEFAULT_CONNECT_TIMEOUT_MS;
+const DEFAULT_PORTS: Record<string, number> = { "https:": 443, "http:": 80 };
+const ACCEPT_HEADER = "text/*, application/json;q=0.9, */*;q=0.1";
 const DOMAIN = /^(?:\*\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 const ALLOWED_TYPES = [
   "text/",
@@ -60,7 +75,18 @@ function normalizeEntry(value: unknown): string | null {
   return entry;
 }
 
-function parseAllowlist(raw: unknown): { domains: string[]; allowHttp: boolean } {
+function normalizePorts(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const ports = new Set<number>();
+  for (const item of value) {
+    const port = typeof item === "number" ? item : typeof item === "string" ? Number(item) : NaN;
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) continue;
+    ports.add(port);
+  }
+  return [...ports].slice(0, 20).sort((a, b) => a - b);
+}
+
+function parseAllowlist(raw: unknown): { domains: string[]; allowHttp: boolean; allowPorts: number[] } {
   const value = Array.isArray(raw) ? { domains: raw } : raw;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new FetchError("FETCH_ALLOWLIST_INVALID");
@@ -69,7 +95,11 @@ function parseAllowlist(raw: unknown): { domains: string[]; allowHttp: boolean }
   const domains = Array.isArray(record.domains)
     ? [...new Set(record.domains.map(normalizeEntry).filter((entry): entry is string => entry !== null))]
     : [];
-  return { domains: domains.slice(0, 100), allowHttp: record.allow_http === true };
+  return {
+    domains: domains.slice(0, 100),
+    allowHttp: record.allow_http === true,
+    allowPorts: normalizePorts(record.allow_ports),
+  };
 }
 
 export async function loadFetchAllowlist(
@@ -94,10 +124,10 @@ export async function loadFetchAllowlist(
     } catch {
       throw new FetchError("FETCH_ALLOWLIST_INVALID");
     }
-    const { domains, allowHttp } = parseAllowlist(parsed);
-    return { domains, allowHttp, source: candidate.source, file: candidate.file };
+    const { domains, allowHttp, allowPorts } = parseAllowlist(parsed);
+    return { domains, allowHttp, allowPorts, source: candidate.source, file: candidate.file };
   }
-  return { domains: [], allowHttp: false, source: "default", file: null };
+  return { domains: [], allowHttp: false, allowPorts: [], source: "default", file: null };
 }
 
 function isIpLiteral(hostname: string): boolean {
@@ -113,35 +143,20 @@ export function domainAllowed(hostname: string, domains: string[]): boolean {
   return false;
 }
 
-/** DNS 解析后再校验：防止"合法域名解析到内网地址"的 SSRF（DNS rebinding）。 */
-async function assertPublicResolution(hostname: string): Promise<void> {
-  if (isIpLiteral(hostname)) throw new FetchError("FETCH_HOST_NOT_ALLOWED");
-  let addresses: Array<{ address: string; family: number }>;
-  try {
-    addresses = await dns.lookup(hostname, { all: true });
-  } catch {
-    throw new FetchError("FETCH_DNS_FAILED");
-  }
-  for (const entry of addresses) {
-    if (isPrivateAddress(entry.address)) throw new FetchError("FETCH_HOST_NOT_ALLOWED");
-  }
+function effectivePort(url: URL): number {
+  if (url.port) return Number(url.port);
+  return DEFAULT_PORTS[url.protocol] ?? 0;
 }
 
-function isPrivateAddress(address: string): boolean {
-  const value = address.toLowerCase();
-  if (value === "::1" || value === "0.0.0.0" || value === "::") return true;
-  if (value.startsWith("fe80:") || value.startsWith("fc") || value.startsWith("fd")) return true;
-  if (value.startsWith("::ffff:")) return isPrivateAddress(value.slice(7));
-  const parts = value.split(".").map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
-  const [a, b] = parts as [number, number, number, number];
-  if (a === 10 || a === 127 || a === 0) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true;
-  return false;
+/** M4：端口只能取默认端口或管理员在配置文件里授权的端口，MCP 调用者无法指定。 */
+function assertPortAllowed(url: URL, allowlist: FetchAllowlist): void {
+  const port = effectivePort(url);
+  const defaultPort = DEFAULT_PORTS[url.protocol];
+  if (port === defaultPort) return;
+  if (allowlist.allowPorts.includes(port)) return;
+  throw new FetchError("FETCH_PORT_NOT_ALLOWED");
 }
+
 function validateUrl(input: unknown, allowlist: FetchAllowlist): URL {
   if (typeof input !== "string" || !input.trim() || input.length > MAX_URL_LENGTH) {
     throw new FetchError("FETCH_URL_INVALID");
@@ -163,6 +178,7 @@ function validateUrl(input: unknown, allowlist: FetchAllowlist): URL {
   }
   if (allowlist.domains.length === 0) throw new FetchError("FETCH_DISABLED");
   if (!domainAllowed(hostname, allowlist.domains)) throw new FetchError("FETCH_DOMAIN_NOT_ALLOWED");
+  assertPortAllowed(url, allowlist);
   return url;
 }
 
@@ -172,40 +188,84 @@ function isTextContentType(value: string | null): boolean {
   return ALLOWED_TYPES.some((allowed) => normalized.startsWith(allowed));
 }
 
+function headerValue(headers: PinnedResponse["headers"], name: string): string | null {
+  const raw = headers[name];
+  if (Array.isArray(raw)) return raw[0] ?? null;
+  return typeof raw === "string" ? raw : null;
+}
+
+/** 读取响应体：边读边计数（避免大文件占内存），并受全局截止时间约束。 */
+async function readBounded(response: PinnedResponse, maxBytes: number, deadlineMs: number): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let settled = false;
+    const finish = (error?: FetchError, buffer?: Buffer): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(buffer ?? Buffer.alloc(0));
+    };
+    const timer = setTimeout(() => {
+      response.destroy();
+      finish(new FetchError("FETCH_TIMEOUT"));
+    }, Math.max(1, deadlineMs - Date.now()));
+    timer.unref?.();
+    response.message.on("data", (chunk: Buffer) => {
+      if (settled) return;
+      bytes += chunk.byteLength;
+      if (bytes > maxBytes) {
+        response.destroy();
+        finish(new FetchError("FETCH_TOO_LARGE"));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    response.message.on("end", () => finish(undefined, Buffer.concat(chunks)));
+    response.message.on("close", () => finish(undefined, Buffer.concat(chunks)));
+    response.message.on("error", () => finish(new FetchError("FETCH_FAILED")));
+  });
+}
+
 export async function fetchUrl(
   profileDir: string,
   workspaceId: string | null,
   args: { url?: unknown; max_bytes?: unknown },
-  request: typeof fetch = fetch,
+  deps: FetchDeps = {},
 ): Promise<Record<string, unknown>> {
   const allowlist = await loadFetchAllowlist(profileDir, workspaceId);
-  let current = validateUrl(args.url, allowlist);
+  const resolve = deps.resolve ?? resolvePinnedTarget;
+  const request = deps.request ?? requestPinned;
   const maxBytes = typeof args.max_bytes === "number" && Number.isInteger(args.max_bytes)
     ? Math.max(1_024, Math.min(MAX_BYTES, args.max_bytes))
     : MAX_BYTES;
 
+  // M3：全局截止时间只在入口计算一次，所有跳共享。
+  const deadlineMs = Date.now() + TOTAL_BUDGET_MS;
+  const visited = new Set<string>();
+  let current = validateUrl(args.url, allowlist);
+
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
-    // 每次（含重定向后的目标）都做解析后校验，防止 DNS rebinding 指向内网。
-    if (request === fetch) await assertPublicResolution(current.hostname);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-    let response: Response;
-    try {
-      response = await request(current.toString(), {
-        method: "GET",
-        redirect: "manual",
-        signal: controller.signal,
-        headers: { accept: "text/*, application/json;q=0.9, */*;q=0.1" },
-      });
-    } catch (error: unknown) {
-      if (controller.signal.aborted) throw new FetchError("FETCH_TIMEOUT");
-      throw new FetchError("FETCH_FAILED");
-    } finally {
-      clearTimeout(timer);
-    }
+    const remaining = deadlineMs - Date.now();
+    if (remaining <= 0) throw new FetchError("FETCH_TIMEOUT");
+    visited.add(current.toString());
+
+    // 每一跳都重新解析并固定 IP；解析结果直接决定连接目标（I1 / M1）。
+    const target = await resolve(current.hostname, {
+      timeoutMs: Math.min(DNS_TIMEOUT_MS, remaining),
+    });
+    const response = await request({
+      url: current,
+      target,
+      headers: { accept: ACCEPT_HEADER, "accept-encoding": "identity" },
+      deadlineMs,
+      connectTimeoutMs: Math.min(CONNECT_TIMEOUT_MS, remaining),
+    });
 
     if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location");
+      const location = headerValue(response.headers, "location");
+      response.destroy();
       if (!location) throw new FetchError("FETCH_REDIRECT_INVALID");
       if (redirect === MAX_REDIRECTS) throw new FetchError("FETCH_REDIRECT_LIMIT");
       let next: URL;
@@ -214,32 +274,37 @@ export async function fetchUrl(
       } catch {
         throw new FetchError("FETCH_REDIRECT_INVALID");
       }
+      // Q3：禁止 https → http 降级（即使 allow_http 打开）。
+      if (current.protocol === "https:" && next.protocol === "http:") {
+        throw new FetchError("FETCH_SCHEME_DOWNGRADE");
+      }
       current = validateUrl(next.toString(), allowlist);
+      if (visited.has(current.toString())) throw new FetchError("FETCH_REDIRECT_LOOP");
       continue;
     }
 
-    if (!response.ok) throw new FetchError("FETCH_HTTP_ERROR");
-    const contentType = response.headers.get("content-type");
-    if (!isTextContentType(contentType)) throw new FetchError("FETCH_CONTENT_TYPE_REJECTED");
-    const declared = Number(response.headers.get("content-length") ?? 0);
-    if (declared > maxBytes) throw new FetchError("FETCH_TOO_LARGE");
-    if (!response.body) throw new FetchError("FETCH_FAILED");
-
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let bytes = 0;
-    try {
-      for (;;) {
-        const next = await reader.read();
-        if (next.done) break;
-        bytes += next.value.byteLength;
-        if (bytes > maxBytes) throw new FetchError("FETCH_TOO_LARGE");
-        chunks.push(next.value);
-      }
-    } finally {
-      reader.releaseLock();
+    if (response.status < 200 || response.status >= 300) {
+      response.destroy();
+      throw new FetchError("FETCH_HTTP_ERROR");
     }
-    const buffer = Buffer.concat(chunks);
+    const contentType = headerValue(response.headers, "content-type");
+    if (!isTextContentType(contentType)) {
+      response.destroy();
+      throw new FetchError("FETCH_CONTENT_TYPE_REJECTED");
+    }
+    // Q6：只接受 identity；不做解压（避免压缩炸弹与额外依赖）。
+    const encoding = (headerValue(response.headers, "content-encoding") ?? "identity").trim().toLowerCase();
+    if (encoding && encoding !== "identity") {
+      response.destroy();
+      throw new FetchError("FETCH_CONTENT_ENCODING_REJECTED");
+    }
+    const declared = Number(headerValue(response.headers, "content-length") ?? 0);
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      response.destroy();
+      throw new FetchError("FETCH_TOO_LARGE");
+    }
+
+    const buffer = await readBounded(response, maxBytes, deadlineMs);
     const decoded = new TextDecoder("utf-8").decode(buffer);
     const truncated = decoded.length > MAX_TEXT_CHARS;
     return {

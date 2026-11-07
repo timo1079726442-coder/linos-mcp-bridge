@@ -128,7 +128,9 @@ test("directory_tree lists bounded safe paths without revealing .env", async () 
 test("git_status explicitly reports non-git workspace", async () => {
   const { root, cleanup } = await fixture();
   try {
-    assert.deepEqual(await call(root, "git_status"), { isRepo: false });
+    const status = await call(root, "git_status");
+    assert.equal(status.isRepo, false);
+    assert.equal(status._meta.auditState, "PENDING");
   } finally {
     await cleanup();
   }
@@ -136,8 +138,15 @@ test("git_status explicitly reports non-git workspace", async () => {
 
 test("create_file / update_file 是真实工具，受 workspace.write 约束", async () => {
   const { root, cleanup } = await fixture();
+  const profileDir = path.join(path.dirname(root), "profile");
+  await mkdir(profileDir, { recursive: true });
+  await writeFile(path.join(profileDir, "tool-policy.json"), JSON.stringify({ version: 1, tools: {
+    execute_command: { enabled: true, approval: "auto" },
+    create_file: { enabled: true, approval: "auto" },
+    update_file: { enabled: true, approval: "auto" },
+  } }), "utf8");
   const caller = { clientId: "registered-client-1", requestId: "mcp-write-1" };
-  const call = (body, options) => dispatchMcp(body, "test-workspace", root, null, { caller, ...options });
+  const call = (body, options) => dispatchMcp(body, "test-workspace", root, path.join(profileDir, "executions.jsonl"), { caller, toolPolicyDir: profileDir, ...options });
   try {
     await assert.rejects(() => call({
       method: "tools/call", params: { name: "create_file", arguments: { path: "new.txt", content: "synthetic" } },

@@ -68,7 +68,10 @@ test("verify_tool_registered 能区分已注册/未注册与当前策略", async
     assert.equal(registered.enabled, true);
 
     const missing = await call(ctx, "verify_tool_registered", { name: "not_a_tool" });
-    assert.deepEqual(missing, { name: "not_a_tool", registered: false });
+    const { _meta, ...missingData } = missing;
+    assert.deepEqual(missingData, { name: "not_a_tool", registered: false });
+    assert.equal(_meta.auditState, "PERSISTED");
+    assert.equal(_meta.auditDurability, "FILE_SYNC_ONLY");
   } finally {
     await rm(ctx.parent, { recursive: true, force: true });
   }

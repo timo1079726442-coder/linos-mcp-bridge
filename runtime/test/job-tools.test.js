@@ -1,13 +1,30 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { McpSecurityBoundary } from "../dist/security-boundary.js";
 import { JobStore } from "../dist/job-store.js";
 import { startJobTool, jobListTool, jobStatusTool, jobOutputTool, jobCancelTool, jobResumeTool } from "../dist/job-tools.js";
+import { createMemoryTimeline } from "../dist/job-timeline.js";
+import { recoverInterruptedJobs, isJobActive } from "../dist/job-runner.js";
 
 const WORKSPACE_ID = "ws_job_test";
+
+// 诊断：仅在设置 MCP_TIMELINE_DIR 时收集（CI/人工压测），正常开发不留痕迹。
+const TIMELINE_DIR = process.env.MCP_TIMELINE_DIR ?? "";
+const timelines = [];
+if (TIMELINE_DIR) {
+  process.on("exit", () => {
+    try {
+      mkdirSync(TIMELINE_DIR, { recursive: true });
+      const file = path.join(TIMELINE_DIR, `job-tools-${process.pid}.jsonl`);
+      writeFileSync(file, timelines.map((t) => t.toJsonl()).join(""), "utf8");
+    } catch { /* 诊断失败不影响测试结果 */ }
+  });
+}
 const CLIENT = "client-job-test";
 
 async function setup() {
@@ -37,6 +54,8 @@ async function setup() {
     workspaceId: WORKSPACE_ID,
     profileDir: profile,
   });
+  const timeline = TIMELINE_DIR ? createMemoryTimeline() : null;
+  if (timeline) timelines.push(timeline);
   const ws = (shellScopeGranted) => ({
     boundary,
     workspaceId: WORKSPACE_ID,
@@ -44,6 +63,7 @@ async function setup() {
     profileDir: profile,
     caller: { clientId: CLIENT, requestId: "job-test-1" },
     shellScopeGranted,
+    ...(timeline ? { timeline: timeline.sink } : {}),
   });
   return { parent, profile, ws };
 }
@@ -70,7 +90,7 @@ async function waitForTerminalState(ws, id, timeoutMs = 15000) {
   }
 }
 
-test("start_job 立即返回并在后台完成只读命令", async () => {
+test("start_job 立即返回且重建客户端上下文后可恢复读取", async () => {
   const ctx = await setup();
   try {
     const ws = ctx.ws(true);
@@ -83,21 +103,22 @@ test("start_job 立即返回并在后台完成只读命令", async () => {
       idempotency_key: "job-a",
       label: "smoke",
     });
+    const reconnectedWs = ctx.ws(true); // 模拟 MCP 客户端断线后重新连接
     assert.match(started.job_id, /^job_[0-9a-f]{24}$/);
     assert.ok(Date.now() - startedAt < 5000, "start_job 必须立即返回而不是等命令结束");
     let status;
     for (let i = 0; i < 200; i += 1) {
-      status = await jobStatusTool(ws, { job_id: started.job_id });
+      status = await jobStatusTool(reconnectedWs, { job_id: started.job_id });
       if (status.state === "SUCCEEDED" || status.state === "FAILED") break;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     await dumpOnFailure(ctx.profile, started.job_id, status);
     assert.equal(status.state, "SUCCEEDED");
     assert.equal(status.exit_code, 0);
-    const out = await jobOutputTool(ws, { job_id: started.job_id, offset: 0, max_bytes: 8192 });
+    const out = await jobOutputTool(reconnectedWs, { job_id: started.job_id, offset: 0, max_bytes: 8192 });
     assert.match(out.output, /job-ok/);
     assert.equal(out.eof, true);
-    const same = await startJobTool(ws, {
+    const same = await startJobTool(reconnectedWs, {
       action: "execute_command",
       command: "node hello.mjs",
       cwd: ".",
@@ -106,6 +127,60 @@ test("start_job 立即返回并在后台完成只读命令", async () => {
     });
     assert.equal(same.job_id, started.job_id);
     assert.equal(same.resumed, true);
+  } finally {
+    await rm(ctx.parent, { recursive: true, force: true });
+  }
+});
+
+test("并发重复 start_job 请求复用同一 idempotency 任务", async () => {
+  const ctx = await setup();
+  const ws = ctx.ws(true);
+  const store = new JobStore(ctx.profile, WORKSPACE_ID);
+  try {
+    const results = await Promise.allSettled(Array.from({ length: 8 }, () => startJobTool(ws, {
+      action: "execute_command",
+      command: "node tick.mjs",
+      cwd: ".",
+      timeout_ms: 30000,
+      idempotency_key: "concurrent-same-key",
+    })));
+    assert.equal(results.filter((item) => item.status === "fulfilled").length, 8);
+    const values = results.map((item) => item.status === "fulfilled" ? item.value : null).filter(Boolean);
+    assert.equal(new Set(values.map((item) => item.job_id)).size, 1);
+    assert.equal(values.filter((item) => !item.resumed).length, 1);
+    const jobId = values[0].job_id;
+    const records = await store.list(20);
+    assert.equal(records.filter((record) => record.spec.idempotencyKey === "concurrent-same-key").length, 1);
+    const cancelled = await jobCancelTool(ws, { job_id: jobId });
+    assert.equal(cancelled.state, "CANCELLED");
+    assert.equal(isJobActive(jobId), false);
+  } finally {
+    for (const record of await store.list(50)) {
+      if (record.state === "RUNNING" || record.state === "QUEUED") {
+        await jobCancelTool(ws, { job_id: record.id }).catch(() => undefined);
+      }
+    }
+    await rm(ctx.parent, { recursive: true, force: true });
+  }
+});
+
+test("workspace 活跃任务上限在并发启动时 fail-closed", async () => {
+  const ctx = await setup();
+  const ws = ctx.ws(true);
+  try {
+    const first = await startJobTool(ws, { action: "execute_command", command: "node tick.mjs", cwd: ".", timeout_ms: 60_000, idempotency_key: "slot-1" });
+    const second = await startJobTool(ws, { action: "execute_command", command: "node tick.mjs", cwd: ".", timeout_ms: 60_000, idempotency_key: "slot-2" });
+    await assert.rejects(
+      () => startJobTool(ws, { action: "execute_command", command: "node tick.mjs", cwd: ".", timeout_ms: 60_000, idempotency_key: "slot-3" }),
+      /JOB_CONCURRENCY_LIMIT/,
+    );
+    const cancelled = await Promise.all([
+      jobCancelTool(ws, { job_id: first.job_id }),
+      jobCancelTool(ws, { job_id: second.job_id }),
+    ]);
+    assert.equal(cancelled.every((item) => item.state === "CANCELLED"), true);
+    assert.equal(isJobActive(first.job_id), false);
+    assert.equal(isJobActive(second.job_id), false);
   } finally {
     await rm(ctx.parent, { recursive: true, force: true });
   }
@@ -158,6 +233,141 @@ test("start_job 拒绝白名单外命令和缺失 shell 授权", async () => {
       if (ownedFinal.state === "SUCCEEDED") break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
+  } finally {
+    await rm(ctx.parent, { recursive: true, force: true });
+  }
+});
+
+test("重启恢复只中断过期任务，保留新鲜队列并可 resume", async () => {
+  const ctx = await setup();
+  try {
+    const ws = ctx.ws(true);
+    const store = new JobStore(ctx.profile, WORKSPACE_ID);
+    const now = Date.now();
+    const staleAt = new Date(now - 60_000).toISOString();
+    const markerPath = path.join(ctx.parent, "crashed-job-id.txt");
+    const childScript = `
+      import { JobStore } from "./dist/job-store.js";
+      import { writeFileSync } from "node:fs";
+      const store = new JobStore(${JSON.stringify(ctx.profile)}, ${JSON.stringify(WORKSPACE_ID)});
+      const record = await store.create({
+        kind: "execute_command", label: "orphaned-after-runtime-crash",
+        clientId: ${JSON.stringify(CLIENT)}, workspaceId: ${JSON.stringify(WORKSPACE_ID)},
+        argv: ["node", "hello.mjs"], display: "node hello.mjs",
+        cwdInput: ".", cwdAbsolute: ${JSON.stringify(ws.workspaceRoot)}, cwdDisplay: ".", timeoutMs: 30000,
+      });
+      await store.save({ ...record, state: "RUNNING", attempts: 1,
+        createdAt: ${JSON.stringify(staleAt)}, startedAt: ${JSON.stringify(staleAt)},
+        lastHeartbeatAt: ${JSON.stringify(staleAt)}, pid: 987654 });
+      writeFileSync(${JSON.stringify(markerPath)}, record.id, "utf8");
+      process.exit(73); // abrupt Runtime termination after durable RUNNING record
+    `;
+    const crashed = spawnSync(process.execPath, ["--input-type=module", "-e", childScript], {
+      cwd: process.cwd(), stdio: "ignore", timeout: 10_000,
+    });
+    assert.equal(crashed.error, undefined);
+    assert.equal(crashed.status, 73);
+    const staleId = (await readFile(markerPath, "utf8")).trim();
+    const stale = await store.get(staleId);
+    assert.equal(stale.state, "RUNNING");
+    const fresh = await store.create({
+      kind: "execute_command", label: "fresh-queued", clientId: CLIENT, workspaceId: WORKSPACE_ID,
+      argv: ["node", "hello.mjs"], display: "node hello.mjs",
+      cwdInput: ".", cwdAbsolute: ws.workspaceRoot, cwdDisplay: ".", timeoutMs: 30_000,
+    });
+
+    const recovered = await recoverInterruptedJobs(store, now, 30_000);
+    assert.equal(recovered, 1);
+    assert.equal((await store.get(staleId)).state, "INTERRUPTED");
+    assert.equal((await store.get(fresh.id)).state, "QUEUED");
+
+    const resumed = await jobResumeTool(ws, { job_id: staleId });
+    assert.equal(resumed.job_id, staleId);
+    const final = await waitForTerminalState(ws, staleId);
+    assert.equal(final.state, "SUCCEEDED");
+    assert.equal(final.attempts, 2);
+    assert.equal(isJobActive(staleId), false);
+  } finally {
+    await rm(ctx.parent, { recursive: true, force: true });
+  }
+});
+
+test("取消后并发 resume 只创建一个新 attempt", async () => {
+  const ctx = await setup();
+  const ws = ctx.ws(true);
+  const store = new JobStore(ctx.profile, WORKSPACE_ID);
+  let jobId = "";
+  try {
+    const started = await startJobTool(ws, { action: "execute_command", command: "node tick.mjs", cwd: ".", timeout_ms: 60_000 });
+    jobId = started.job_id;
+    let status = null;
+    for (let i = 0; i < 100; i += 1) {
+      status = await jobStatusTool(ws, { job_id: jobId });
+      if (status.state === "RUNNING" && status.pid) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(status.state, "RUNNING");
+    const cancelled = await jobCancelTool(ws, { job_id: jobId });
+    assert.equal(cancelled.state, "CANCELLED");
+    assert.equal(isJobActive(jobId), false);
+
+    const resumes = await Promise.all([
+      jobResumeTool(ws, { job_id: jobId }),
+      jobResumeTool(ws, { job_id: jobId }),
+    ]);
+    assert.equal(resumes.length, 2);
+    assert.equal(resumes[0].job_id, jobId);
+    assert.equal(resumes[1].job_id, jobId);
+    let resumedRecord = await store.get(jobId);
+    const resumedDeadline = Date.now() + 15_000;
+    while (Date.now() < resumedDeadline && resumedRecord.attempts < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      resumedRecord = await store.get(jobId);
+    }
+    assert.equal(resumedRecord.attempts, 2);
+    assert.equal(isJobActive(jobId), true);
+
+    const cancelledAgain = await jobCancelTool(ws, { job_id: jobId });
+    assert.equal(cancelledAgain.state, "CANCELLED");
+    assert.equal(isJobActive(jobId), false);
+  } finally {
+    for (const record of await store.list(50)) {
+      if ((record.state === "RUNNING" || record.state === "QUEUED") && isJobActive(record.id)) {
+        await jobCancelTool(ws, { job_id: record.id }).catch(() => undefined);
+      }
+    }
+    await rm(ctx.parent, { recursive: true, force: true });
+  }
+});
+
+test("运行期间心跳更新且 settle 后停止", async () => {
+  const ctx = await setup();
+  try {
+    const ws = ctx.ws(true);
+    const store = new JobStore(ctx.profile, WORKSPACE_ID);
+    const started = await startJobTool(ws, { action: "execute_command", command: "node tick.mjs", cwd: ".", timeout_ms: 60_000 });
+    let status = null;
+    for (let i = 0; i < 100; i += 1) {
+      status = await jobStatusTool(ws, { job_id: started.job_id });
+      if (status.state === "RUNNING" && status.pid) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(status.state, "RUNNING");
+    const initialHeartbeat = Date.parse(status.last_heartbeat_at);
+    let heartbeat = status;
+    const deadline = Date.now() + 12_000;
+    while (Date.now() < deadline && Date.parse(heartbeat.last_heartbeat_at) <= initialHeartbeat) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      heartbeat = await jobStatusTool(ws, { job_id: started.job_id });
+    }
+    assert.ok(Date.parse(heartbeat.last_heartbeat_at) > initialHeartbeat, "heartbeat must advance while RUNNING");
+    const cancelled = await jobCancelTool(ws, { job_id: started.job_id });
+    assert.equal(cancelled.state, "CANCELLED");
+    assert.equal(isJobActive(started.job_id), false);
+    const settled = await store.get(started.job_id);
+    const finalHeartbeat = settled.lastHeartbeatAt;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal((await store.get(started.job_id)).lastHeartbeatAt, finalHeartbeat, "heartbeat must stop after controller settle");
   } finally {
     await rm(ctx.parent, { recursive: true, force: true });
   }

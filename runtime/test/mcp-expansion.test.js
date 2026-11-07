@@ -50,8 +50,13 @@ test("CSV MCP tool only reads CSV files in the workspace", async () => {
     await assert.rejects(() => invoke(root, "csv_preview", { path: "../report.csv" }), /path_outside_workspace/);
     await assert.rejects(() => invoke(root, "csv_preview", { path: ".env" }), /csv_extension_required/);
     const notRepo = await invoke(root, "git_recent_commits", {});
-    assert.deepEqual(notRepo, { isRepo: false, records: [] });
-    assert.deepEqual(await invoke(root, "git_local_branches", {}), { isRepo: false, branches: [] });
+    assert.equal(notRepo.isRepo, false);
+    assert.deepEqual(notRepo.records, []);
+    assert.equal(notRepo._meta.auditState, "PENDING");
+    const noBranches = await invoke(root, "git_local_branches", {});
+    assert.equal(noBranches.isRepo, false);
+    assert.deepEqual(noBranches.branches, []);
+    assert.equal(noBranches._meta.auditState, "PENDING");
     await writeFile(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test", lint: "echo lint", secret_task: "never expose command" } }), "utf8");
     await writeFile(path.join(root, "check.test.js"), "test fixture", "utf8");
     const inventory = await invoke(root, "test_inventory", {});

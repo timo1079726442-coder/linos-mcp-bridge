@@ -1158,7 +1158,6 @@ export function registerIpcHandlers(ctx: IpcContext): void {
           const values = result.values.autoStart;
           app.setLoginItemSettings({
             openAtLogin: values.atLogin === true,
-            openAsHidden: values.minimized === true,
             path: process.execPath,
             args: values.minimized === true ? ["--hidden"] : [],
           });

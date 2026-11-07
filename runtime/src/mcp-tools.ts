@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { execFile } from "node:child_process";
@@ -199,7 +199,7 @@ export const TOOL_INVENTORY: ReadonlyArray<{
   { name: "mysql_describe_table", conditional: true, group: "数据源", approval: "auto", enabled: false, description: "查看只读数据源中某张表的列、类型与键。" },
   { name: "mysql_query", conditional: true, group: "数据源", approval: "manual", enabled: false, description: "执行一条只读 SQL（单条 SELECT/SHOW/EXPLAIN），有行数/超时/字节上限。" },
   { name: "search", conditional: false, group: "搜索", approval: "auto", description: "search_workspace 的兼容别名：按关键字搜索工作区内容。" },
-  { name: "fetch", conditional: false, group: "联网", approval: "auto", description: "只读 GET 一个白名单域名下的文本 URL（https、10s 超时、1MB 上限、逐跳校验）。" },
+  { name: "fetch", conditional: false, group: "联网", approval: "auto", description: "只读 GET 一个白名单域名下的文本 URL（https、20s 总预算、1MB 上限、逐跳重新解析并固定 IP、禁止 https→http 降级）。" },
   { name: "get_mcp_app_settings", conditional: false, group: "设置", approval: "auto", description: "返回这个 MCP 服务给 ChatGPT 用的连接器配置（名称、说明、URL、认证方式、工具数）。" },
   { name: "verify_tool_registered", conditional: false, group: "自检", approval: "auto", description: "核验某个工具是否注册、是否条件工具，以及当前开关与审批方式。" },
   { name: "screen_list_windows", conditional: false, group: "屏幕", description: "列出当前桌面上的可见窗口标题与编号；不抓取画面内容。" },
@@ -310,6 +310,8 @@ export interface McpDispatchOptions {
   readonly toolPolicyDir?: string;
   /** 是否持有 workspace.shell（命令/PowerShell/git_commit）。 */
   readonly shellScopeGranted?: boolean;
+  /** Durable high-risk audit operation ID; supplied only by dispatchMcp after intent persistence. */
+  readonly auditOperationId?: string;
   /** 控制中心展示连接器配置用：本地实际监听端口与公网 MCP 地址。 */
   readonly localPort?: number;
   readonly publicMcpUrl?: string | null;
@@ -335,6 +337,34 @@ interface GitSnapshot {
   behind?: number | null;
 }
 
+function isHighRiskAuditTool(tool: string): boolean {
+  return WRITE_SCOPE_TOOL_NAMES.has(tool)
+    || SHELL_SCOPE_TOOL_NAMES.has(tool)
+    || tool === "job_cancel"
+    || tool === "workflow_prepare"
+    || tool === "workflow_commit"
+    || tool === "workflow_continue"
+    || tool === "workflow_cancel"
+    || tool === "workflow_run_step"
+    || tool === "shadcn_add"
+    || tool === "shadcn_init";
+}
+
+function withAuditState(result: unknown, auditState: string, operationId: string, durability?: string): unknown {
+  const auditMeta = { auditState, auditOperationId: operationId, ...(durability ? { auditDurability: durability } : {}) };
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const record = result as Record<string, unknown>;
+    const existingMeta = record._meta && typeof record._meta === "object" ? record._meta as Record<string, unknown> : {};
+    return { ...record, _meta: { ...existingMeta, ...auditMeta } };
+  }
+  return { value: result, _meta: auditMeta };
+}
+
+function auditErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.split(/[:：]/)[0]?.trim().slice(0, 80) || "TOOL_CALL_FAILED";
+}
+
 export async function dispatchMcp(
   body: unknown,
   workspaceId: string,
@@ -348,42 +378,85 @@ export async function dispatchMcp(
     : "";
   const profileDir = dispatchOptions.toolPolicyDir
     ?? (executionStorePath ? path.dirname(executionStorePath) : "");
-  if (method !== "tools/call" || !tool || !profileDir) {
+  if (method !== "tools/call" || !tool) {
     return dispatchMcpInner(body, workspaceId, workspaceRoot, executionStorePath, dispatchOptions);
   }
+
   const args = ((body as { params?: { arguments?: Record<string, unknown> } })?.params?.arguments ?? {}) as Record<string, unknown>;
   const started = Date.now();
-  const pathArg = typeof args.path === "string" ? args.path : undefined;
-  const commandArg = typeof args.command === "string" ? args.command : undefined;
+  const operationId = randomUUID();
+  const highRisk = isHighRiskAuditTool(tool);
+  const auditInput = {
+    tool,
+    durationMs: 0,
+    path: typeof args.path === "string" ? args.path : typeof args.cwd === "string" ? args.cwd : undefined,
+    paths: Array.isArray(args.paths) ? args.paths.filter((value): value is string => typeof value === "string") : undefined,
+    command: typeof args.command === "string" ? args.command
+      : tool === "git_commit" && typeof args.message === "string" ? `git commit -m ${args.message}` : undefined,
+    clientId: dispatchOptions.caller?.clientId,
+    workspaceRoot,
+    ...(typeof args.idempotency_key === "string" ? { idempotencyKey: args.idempotency_key } : {}),
+  };
+  let auditModule: typeof import("./tool-audit.js") | null = null;
+  let intentDurability: string | undefined;
+  if (highRisk) {
+    if (!profileDir) throw new Error("AUDIT_UNAVAILABLE：高风险操作缺少可用审计目录，未执行。");
+    try {
+      auditModule = await import("./tool-audit.js");
+      const intent = await auditModule.appendToolAuditIntent(profileDir, workspaceId, auditInput, operationId);
+      intentDurability = intent.durability;
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? String((error as Error & { code?: unknown }).code) : "AUDIT_UNAVAILABLE";
+      throw new Error(`AUDIT_UNAVAILABLE：高风险操作的审计意图未能持久化（${code}），未执行。`);
+    }
+  }
+  const optionsWithAudit = highRisk ? { ...dispatchOptions, auditOperationId: operationId } : dispatchOptions;
+  let result: unknown;
   try {
-    const result = await dispatchMcpInner(body, workspaceId, workspaceRoot, executionStorePath, dispatchOptions);
-    const data = (result as { result?: unknown })?.result ?? result;
-    const record = (data ?? {}) as { bytes?: unknown; sha256?: unknown };
-    const { appendToolAudit } = await import("./tool-audit.js");
-    await appendToolAudit(profileDir, {
-      tool,
-      ok: true,
-      durationMs: Date.now() - started,
-      path: pathArg,
-      command: commandArg,
-      bytes: typeof record.bytes === "number" ? record.bytes : undefined,
-      sha256: typeof record.sha256 === "string" ? record.sha256 : undefined,
-      clientId: dispatchOptions.caller?.clientId,
-    });
-    return result;
+    result = await dispatchMcpInner(body, workspaceId, workspaceRoot, executionStorePath, optionsWithAudit);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const { appendToolAudit } = await import("./tool-audit.js");
-    await appendToolAudit(profileDir, {
-      tool,
-      ok: false,
-      durationMs: Date.now() - started,
-      path: pathArg,
-      command: commandArg,
-      errorCode: message.split(/[:：]/)[0]?.trim().slice(0, 80) || "TOOL_CALL_FAILED",
-      clientId: dispatchOptions.caller?.clientId,
-    });
+    if (profileDir) {
+      try {
+        auditModule ??= await import("./tool-audit.js");
+        const failedInput = { ...auditInput, ok: false, durationMs: Date.now() - started, errorCode: auditErrorCode(error) };
+        if (highRisk) await auditModule.appendToolAuditResult(profileDir, workspaceId, failedInput, operationId);
+        else await auditModule.appendReadOnlyToolAudit(profileDir, workspaceId, failedInput, operationId);
+      } catch {
+        if (highRisk) throw new Error(`AUDIT_PENDING：操作 ${operationId} 的执行结果无法持久化；不得自动重放。`);
+      }
+    }
     throw error;
+  }
+
+  const resultRecord = result && typeof result === "object" ? result as Record<string, unknown> : {};
+  const idempotentReuse = resultRecord.resumed === true;
+  const completedInput = {
+    ...auditInput,
+    ok: true,
+    durationMs: Date.now() - started,
+    ...(typeof resultRecord.bytes === "number" ? { bytes: resultRecord.bytes } : {}),
+    ...(typeof resultRecord.sha256 === "string" ? { sha256: resultRecord.sha256 } : {}),
+  };
+  if (!profileDir) return withAuditState(result, "PENDING", operationId);
+  try {
+    auditModule ??= await import("./tool-audit.js");
+    if (!highRisk) {
+      const receipt = await auditModule.appendReadOnlyToolAudit(profileDir, workspaceId, completedInput, operationId);
+      return withAuditState(result, "PERSISTED", operationId, receipt.durability);
+    }
+    if (tool === "start_job" || tool === "job_resume") {
+      if (idempotentReuse) {
+        const receipt = await auditModule.appendToolAuditResult(profileDir, workspaceId, completedInput, operationId);
+        return withAuditState(result, "PERSISTED", operationId, receipt.durability);
+      }
+      const state = resultRecord.auditState === "EXECUTION_STARTED_DURABLE" ? "EXECUTION_STARTED_DURABLE" : "PENDING";
+      return withAuditState(result, state, operationId,
+        typeof resultRecord.auditDurability === "string" ? resultRecord.auditDurability : intentDurability);
+    }
+    const receipt = await auditModule.appendToolAuditResult(profileDir, workspaceId, completedInput, operationId);
+    return withAuditState(result, "PERSISTED", operationId, receipt.durability);
+  } catch {
+    return withAuditState(result, "PENDING", operationId, intentDurability);
   }
 }
 
@@ -481,6 +554,7 @@ async function dispatchMcpInner(
       profileDir,
       caller: ws.dispatchOptions.caller,
       shellScopeGranted: ws.dispatchOptions.shellScopeGranted,
+      auditOperationId: ws.dispatchOptions.auditOperationId,
     });
     return ws.boundary.redact(data);
   }
@@ -1310,10 +1384,10 @@ async function dispatchMcpInner(
           },
           {
             name: "fetch",
-            description: "只读 GET 一个白名单域名下的文本 URL；不支持自定义方法/请求头，逐跳校验、10s 超时、1MB 上限。",
+            description: "只读 GET 一个白名单域名下的文本 URL；不支持自定义方法/请求头/端口，逐跳重新解析并固定 IP、禁止 https→http 降级、20s 总预算、1MB 上限。",
             inputSchema: objectSchema(
               {
-                url: { type: "string", description: "https URL；域名必须已加入当前工作区的 fetch 白名单" },
+                url: { type: "string", description: "https URL；域名必须已加入当前工作区的 fetch 白名单；端口只能是默认端口或在白名单 allow_ports 中授权" },
                 max_bytes: { type: "integer", minimum: 1024, maximum: 1048576 },
               },
               ["url"],
@@ -1614,7 +1688,29 @@ function fetchHint(code: string): string {
     case "FETCH_CONTENT_TYPE_REJECTED":
       return "只允许文本/JSON/XML 类响应。";
     case "FETCH_TIMEOUT":
-      return "请求超时（10s）。";
+      return "请求超时（总预算 20s，所有重定向共享）。";
+    case "FETCH_CONNECT_TIMEOUT":
+      return "建立连接超时（5s）。";
+    case "FETCH_DNS_TIMEOUT":
+      return "域名解析超时（3s）。";
+    case "FETCH_DNS_EMPTY":
+    case "FETCH_DNS_INVALID_ADDRESS":
+    case "FETCH_DNS_FAILED":
+      return "域名解析失败或返回了不可用的地址。";
+    case "FETCH_TLS_FAILED":
+      return "TLS 证书校验失败；不会降级为不校验连接。";
+    case "FETCH_PEER_MISMATCH":
+      return "实际连接的对端地址与校验通过的地址不一致，已中止（可能为 DNS 重绑定攻击）。";
+    case "FETCH_LOOKUP_HOST_MISMATCH":
+      return "底层解析请求了非预期域名，已中止。";
+    case "FETCH_SCHEME_DOWNGRADE":
+      return "禁止从 https 重定向降级到 http。";
+    case "FETCH_PORT_NOT_ALLOWED":
+      return "该端口未被授权；仅允许默认端口，其它端口需管理员在白名单中显式开启。";
+    case "FETCH_REDIRECT_LOOP":
+      return "检测到重定向环，已中止。";
+    case "FETCH_CONTENT_ENCODING_REJECTED":
+      return "不支持压缩响应（只接受 identity 编码）。";
     case "FETCH_HTTP_ERROR":
       return "目标返回了非 2xx 状态。";
     case "FETCH_ALLOWLIST_INVALID":

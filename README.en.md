@@ -42,7 +42,7 @@ Electron main (window / tray / IPC)
 Requires Windows 10/11 and Node.js ≥ 20.
 
 ```powershell
-git clone <this-repo>
+git clone https://github.com/timo1079726442-coder/linos-mcp-bridge.git
 cd linos-mcp-bridge
 npm ci
 npm run build:runtime
@@ -69,6 +69,28 @@ It checks Node, installs dependencies, builds runtime + app, and prints the exac
 | **Your own domain** (named) | Daily use, stable URL | `.\scripts\tunnel-named.ps1 -Domain mcp.example.com` → follow the printed cloudflared steps once, then the URL is permanent |
 
 Details and troubleshooting: [docs/INSTALL.md](docs/INSTALL.md).
+
+## Download and verify (portable)
+
+If you would rather not build from source, use the release artifact:
+
+| File | Purpose |
+|---|---|
+| `LinOS-MCP-Portable-<version>-x64.zip` | Unzip and run. No Node.js install, no registry writes |
+| `SHA256SUMS.txt` | Verify the download is intact and untampered |
+| `sbom.json` | Dependency inventory (CycloneDX) for third-party review |
+
+```powershell
+Get-FileHash .\LinOS-MCP-Portable-0.1.1-x64.zip -Algorithm SHA256   # must match SHA256SUMS.txt
+Expand-Archive .\LinOS-MCP-Portable-0.1.1-x64.zip -DestinationPath D:\LinOS-MCP
+# then run D:\LinOS-MCP\LinOS MCP.exe
+```
+
+Two things to know up front:
+
+- **Not code-signed yet**: the first launch shows the SmartScreen "unknown publisher" prompt. Verify the SHA256 above; signing is planned for a later release.
+- **Windows audit durability**: the audit journal `fsync`s file contents, but Windows cannot `fsync` directory entries, so the runtime reports `FILE_SYNC_ONLY`. Tamper detection and fail-closed behaviour (high-risk calls are refused when auditing cannot be persisted) are unaffected.
+
 
 ## Connect ChatGPT
 
