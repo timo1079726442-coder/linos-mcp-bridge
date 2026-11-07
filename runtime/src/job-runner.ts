@@ -531,3 +531,29 @@ async function runJob(
     }
   }
 }
+
+/**
+ * 向交互式任务的 stdin 写入一行输入。
+ *
+ * 借鉴 DesktopCommanderMCP 的 "interactive process" 能力，独立实现：
+ * - 仅对 `interactive: true` 创建的任务开放（默认任务不保持 stdin 语义）；
+ * - 任务必须仍在运行，且 stdin 未关闭；
+ * - 单次写入有字节上限，避免把整份文件塞进交互进程。
+ */
+export const MAX_JOB_INPUT_BYTES = 8 * 1024;
+
+export async function writeJobInput(jobId: string, text: string): Promise<{ bytes: number; newline: boolean }> {
+  const controller = activeJobs.get(jobId);
+  if (!controller?.child?.stdin || controller.child.stdin.destroyed) {
+    throw new Error("JOB_NOT_INTERACTIVE：任务未在运行或未开启交互模式。");
+  }
+  const payload = text.length > MAX_JOB_INPUT_BYTES ? text.slice(0, MAX_JOB_INPUT_BYTES) : text;
+  const bytes = Buffer.byteLength(payload, "utf8");
+  await new Promise<void>((resolve, reject) => {
+    controller.child!.stdin!.write(payload, "utf8", (error) => {
+      if (error) reject(new Error(`JOB_INPUT_FAILED：${error.message}`));
+      else resolve();
+    });
+  });
+  return { bytes, newline: payload.endsWith("\n") };
+}

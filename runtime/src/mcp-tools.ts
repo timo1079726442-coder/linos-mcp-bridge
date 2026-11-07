@@ -172,6 +172,7 @@ export const TOOL_INVENTORY: ReadonlyArray<{
   { name: "run_powershell", conditional: true, group: "命令", approval: "manual", enabled: false, description: "运行 PowerShell：mode=user 为当前用户（无沙箱），mode=constrained 为受限语言模式（非 OS 沙箱）。" },
   { name: "git_commit", conditional: true, group: "命令", approval: "manual", enabled: false, description: "提交已暂存的 Git 改动（不 add、不 push）。" },
   { name: "start_job", conditional: true, group: "任务", approval: "manual", enabled: false, description: "异步启动一个后台任务并立即返回 job_id；支持 execute_command / run_powershell / git_commit，用于长任务轮询。" },
+  { name: "job_input", conditional: true, group: "任务", approval: "manual", description: "向以 interactive 模式启动的后台任务写入一行输入（stdin），用于交互式进程。" },
   { name: "job_status", conditional: true, group: "任务", approval: "auto", description: "查询后台任务状态、进度与退出码；轮询不阻塞。" },
   { name: "job_output", conditional: true, group: "任务", approval: "auto", description: "分页读取后台任务的脱敏输出片段。" },
   { name: "job_list", conditional: true, group: "任务", approval: "auto", description: "列出当前工作区的后台任务与最新状态；不返回输出正文。" },
@@ -341,6 +342,7 @@ function isHighRiskAuditTool(tool: string): boolean {
   return WRITE_SCOPE_TOOL_NAMES.has(tool)
     || SHELL_SCOPE_TOOL_NAMES.has(tool)
     || tool === "job_cancel"
+    || tool === "job_input"
     || tool === "workflow_prepare"
     || tool === "workflow_commit"
     || tool === "workflow_continue"
@@ -1104,6 +1106,7 @@ async function dispatchMcpInner(
                 timeout_ms: { type: "integer", minimum: 1000, maximum: 14400000, description: "后台执行超时默认 30 分钟上限 4 小时" },
                 idempotency_key: { type: "string", description: "幂等键避免重复提交" },
                 label: { type: "string", description: "任务显示名最多 120 字符" },
+                interactive: { type: "boolean", description: "保持 stdin 打开，允许用 job_input 写入（交互式进程）" },
               },
               ["action"],
             ),
@@ -1114,12 +1117,24 @@ async function dispatchMcpInner(
             inputSchema: objectSchema({ job_id: { type: "string", description: "start_job 返回的任务编号" } }, ["job_id"]),
           },
           {
-            name: "job_output",
-            description: "分页读取后台任务的脱敏输出片段。",
+            name: "job_input",
+            description: "向以 interactive 模式启动的后台任务写入输入（stdin），用于交互式进程（REPL、等待输入的脚本）。",
             inputSchema: objectSchema(
               {
                 job_id: { type: "string", description: "start_job 返回的任务编号" },
-                offset: { type: "integer", minimum: 0, description: "字节偏移默认 0" },
+                input: { type: "string", description: "要写入的一行文本" },
+                newline: { type: "boolean", description: "是否追加换行，默认 true" },
+              },
+              ["job_id", "input"],
+            ),
+          },
+          {
+            name: "job_output",
+            description: "分页读取后台任务的脱敏输出片段；offset 为负表示从末尾读取（tail）。",
+            inputSchema: objectSchema(
+              {
+                job_id: { type: "string", description: "start_job 返回的任务编号" },
+                offset: { type: "integer", description: "字节偏移；默认 0，负数表示从末尾往前（如 -4096 取最后 4KB）" },
                 max_bytes: { type: "integer", minimum: 1, maximum: 32768, description: "最多返回字节默认 8192" },
               },
               ["job_id"],
@@ -1490,6 +1505,7 @@ const JOB_TOOL_NAMES = new Set([
   "job_list",
   "job_cancel",
   "job_resume",
+  "job_input",
 ]);
 
 /** 只读 MySQL 数据源工具（委托主进程）。 */
@@ -1937,14 +1953,20 @@ async function callTool(name: string, args: Record<string, unknown>, ws: Workspa
       const bytes = await fs.readFile(resolved.absolute);
       if (isLikelyBinary(resolved.relative, bytes)) throw new McpSecurityError("binary_file_denied");
       const lines = bytes.toString("utf8").split(/\r?\n/);
-      const startLine = ws.boundary.limit(args.start_line, 0, lines.length);
+      const rawStart = typeof args.start_line === "number" && Number.isInteger(args.start_line) ? args.start_line : 0;
       const limit = ws.boundary.limit(args.limit, 400, 400);
+      // 负 start_line 表示"从末尾往前读"（类似 tail）：-200 即最后 200 行。
+      const negativeTail = rawStart < 0;
+      const startLine = negativeTail
+        ? Math.max(0, lines.length - Math.min(Math.abs(rawStart), lines.length))
+        : ws.boundary.limit(args.start_line, 0, lines.length);
       return {
         path: resolved.relative,
         totalLines: lines.length,
         startLine,
         lines: lines.slice(startLine, startLine + limit),
         truncated: startLine + limit < lines.length,
+        ...(negativeTail ? { tail: true } : {}),
       };
     }
     case "search_workspace":

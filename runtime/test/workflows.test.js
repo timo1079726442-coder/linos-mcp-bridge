@@ -320,7 +320,7 @@ test("已认证客户端的 tools/list 包含 6 个工作流工具", async () =>
     for (const name of ["workflow_prepare", "workflow_commit", "workflow_status", "workflow_continue", "workflow_cancel", "workflow_run_step"]) {
       assert.ok(names.includes(name), name);
     }
-    assert.equal(listed.tools.length, 74);
+    assert.equal(listed.tools.length, 75);
   } finally {
     await rm(ctx.parent, { recursive: true, force: true });
   }

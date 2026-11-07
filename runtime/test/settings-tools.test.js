@@ -77,7 +77,7 @@ test("verify_tool_registered 能区分已注册/未注册与当前策略", async
   }
 });
 
-test("已认证客户端的 tools/list 包含兼容工具，共 58 个", async () => {
+test("已认证客户端的 tools/list 包含兼容工具，共 75 个", async () => {
   const ctx = await setup();
   try {
     const listed = await dispatchMcp(
@@ -91,7 +91,7 @@ test("已认证客户端的 tools/list 包含兼容工具，共 58 个", async (
     for (const name of ["search", "get_mcp_app_settings", "verify_tool_registered"]) {
       assert.ok(names.includes(name), name);
     }
-    assert.equal(listed.tools.length, 74);
+    assert.equal(listed.tools.length, 75);
   } finally {
     await rm(ctx.parent, { recursive: true, force: true });
   }

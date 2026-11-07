@@ -30,6 +30,8 @@ export interface JobSpec {
   mode?: "user" | "constrained";
   message?: string;
   allowEmpty?: boolean;
+  /** 交互式任务：保持 stdin 打开，允许 job_input 写入（默认 false，行为不变）。 */
+  interactive?: boolean;
 }
 
 export interface JobCheckpoint {
@@ -89,6 +91,8 @@ export interface JobStartInput {
   mode?: "user" | "constrained";
   message?: string;
   allowEmpty?: boolean;
+  /** 交互式任务：保持 stdin 打开，允许 job_input 写入（默认 false，行为不变）。 */
+  interactive?: boolean;
 }
 
 export interface JobStatus {
@@ -225,6 +229,7 @@ export class JobStore {
         ...(input.mode ? { mode: input.mode } : {}),
         ...(input.message ? { message: input.message.slice(0, 500) } : {}),
         ...(input.allowEmpty !== undefined ? { allowEmpty: input.allowEmpty } : {}),
+      ...(input.interactive === true ? { interactive: true } : {}),
       },
       state: "QUEUED",
       attempts: 0,
@@ -400,6 +405,16 @@ export class JobStore {
     };
     await this.save(next);
     return { outputBytes: next.outputBytes, truncated: next.truncatedOutput };
+  }
+
+  /** 输出日志当前字节数；文件不存在返回 null。用于支持负 offset（tail）读取。 */
+  async outputSize(id: string): Promise<number | null> {
+    try {
+      const stat = await fs.stat(logFile(this.requireDir(), id));
+      return stat.size;
+    } catch {
+      return null;
+    }
   }
 
   async readOutput(id: string, offset: number, maxBytes: number): Promise<{ output: string; nextOffset: number; eof: boolean; truncated: boolean }> {
