@@ -1,4 +1,4 @@
-# LinOS C2C 工具箱（浏览器扩展）
+# LinOS MCP 工具箱（浏览器扩展）
 
 在**网页版 AI**（DeepSeek / Gemini / 千问）里直接调用本机 MCP 工具。
 
@@ -13,7 +13,7 @@
 1. 打开 `chrome://extensions/`
 2. 右上角打开「开发者模式」
 3. 点「加载已解压的扩展程序」→ 选择本目录（`extension/`）
-4. 打开 https://chat.deepseek.com ，右下角应出现 **C2C** 圆形按钮
+4. 打开 https://chat.deepseek.com ，右下角应出现 **MCP** 圆形按钮
 
 Edge：`edge://extensions/` → 同样打开「开发人员模式」→「加载解压缩的扩展」。
 （Chrome 主用、Edge 兜底，两者都兼容 MV3。）

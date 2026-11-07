@@ -39,10 +39,10 @@
       .cfg.open { display: block; }
     </style>
     <div class="wrap">
-      <button class="toggle" id="toggle" title="LinOS C2C 工具箱">C2C</button>
+      <button class="toggle" id="toggle" title="LinOS MCP 工具箱">MCP</button>
       <div class="panel" id="panel">
         <div class="row">
-          <h3 class="grow">LinOS C2C 工具箱</h3>
+          <h3 class="grow">LinOS MCP 工具箱</h3>
           <button class="gear" id="gear" title="设置">⚙</button>
         </div>
         <div class="hint">先点「列出工具」，选工具、填参数，执行后把结果复制回对话。</div>

@@ -472,7 +472,7 @@ export function ConnectionsPage({ view }: { view: ConnectionView }): JSX.Element
                       <>
                         <label>
                           <span className="muted"><MetricHelp term="Hostname">Hostname</MetricHelp></span>
-                          <input value={serviceDraft.hostname ?? ""} onChange={(event) => updateServiceDraft("hostname", event.target.value)} placeholder="例如 c2c-v2-preview.example.com" disabled={busy} style={{ display: "block", width: "100%", marginTop: 4 }} />
+                          <input value={serviceDraft.hostname ?? ""} onChange={(event) => updateServiceDraft("hostname", event.target.value)} placeholder="例如 mcp-preview.example.com" disabled={busy} style={{ display: "block", width: "100%", marginTop: 4 }} />
                         </label>
                         <label>
                           <span className="muted"><MetricHelp term="Tunnel 名称">Tunnel 名称</MetricHelp></span>

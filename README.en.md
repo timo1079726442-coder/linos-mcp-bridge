@@ -42,7 +42,7 @@ Electron main (window / tray / IPC)
 Requires Windows 10/11 and Node.js ≥ 20.
 
 ```powershell
-git clone <this-repo>
+git clone https://github.com/timo1079726442-coder/linos-mcp-bridge.git
 cd linos-mcp-bridge
 npm ci
 npm run build:runtime

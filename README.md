@@ -42,7 +42,7 @@ Electron 主进程（窗口 / 托盘 / IPC）
 需要 Windows 10/11、Node.js ≥ 20。
 
 ```powershell
-git clone <this-repo>
+git clone https://github.com/timo1079726442-coder/linos-mcp-bridge.git
 cd linos-mcp-bridge
 npm ci
 npm run build:runtime
