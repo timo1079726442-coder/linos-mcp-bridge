@@ -69,3 +69,6 @@ release-portable/
 
 # runtime/src 下的编译残留（源码只用 .ts，产物进 runtime/dist）
 runtime/src/**/*.js
+
+# 发行附件（SBOM、校验和、provenance）由发布流程生成，不入库
+dist-release/
