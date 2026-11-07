@@ -19,6 +19,16 @@ files:
   - runtime/package.json
   - runtime/dist/**/*
   - runtime/node_modules/**/*
+  # 构建期依赖不得进包：runtime 只需要 express 运行时即可
+  - "!runtime/node_modules/typescript/**"
+  - "!runtime/node_modules/@types/**"
+  - "!runtime/node_modules/.bin/**"
+  # 开发/文档/示例/类型声明不进包（保留 LICENSE 与 package.json）
+  - "!runtime/node_modules/**/{test,tests,__tests__,docs,doc,example,examples,benchmark,benchmarks}/**"
+  - "!runtime/node_modules/**/*.d.ts"
+  - "!runtime/node_modules/**/*.d.mts"
+  - "!runtime/node_modules/**/*.map"
+  - "!runtime/node_modules/**/*.md"
   - assets/**
   - "!**/*.map"
   - extension/**
@@ -39,6 +49,7 @@ compression: maximum
 
 win:
   target: ["zip"]
+  icon: assets/icon-256.png
   artifactName: LinOS-MCP-Portable-${version}-${arch}.${ext}
 
 publish: null

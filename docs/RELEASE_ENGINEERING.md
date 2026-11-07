@@ -99,22 +99,82 @@ Get-FileHash .\release-portable\LinOS-MCP-Portable-0.1.1-x64.zip -Algorithm SHA2
 
 ---
 
-## 6. 干净 Windows 环境验证（未完成）
+## 6. 打包内容核对（已做，发现并修掉 3 个真实问题）
 
-这是**唯一剩余的整体性门禁**，需要在没有开发环境残留的机器/虚拟机上完成：
+新增静态核对脚本：`scripts/verify-portable-assets.ps1`（纯 ASCII 输出，兼容 Windows PowerShell 5.1）。
+它只做静态检查，不启动 GUI：算 SHA256 → 解压到空目录 → 校验必需文件 → 校验禁止项 → 打印体积。
+
+首轮运行抓出三个**真实打包缺陷**：
+
+| 问题 | 事实 | 处理 |
+|---|---|---|
+| 渲染层依赖被打进包 | `resources/app/node_modules` 里有 `react`/`react-dom`/`react-router-dom`/`scheduler`（约 9.6MB），但渲染层已由 Vite 打包，主进程不引用 React | 把三者移到 `devDependencies`，`dependencies` 只剩 `mysql2`（主进程动态 `import("mysql2/promise")`，必须随包） |
+| 编译器被打进包 | `runtime/node_modules/typescript` 19MB 被 `runtime/node_modules/**/*` 整体打进去 | 在 `electron-builder.yml` 增加负极模式，排除 `typescript`、`@types`、`.bin`、tests/docs/examples、`*.d.ts`、`*.map`、`*.md` |
+| LICENSE 被误删 | 我最初写的 `!**/node_modules/**/LICENSE*` 是"排除"语义，导致第三方许可证从包里消失 | 删除该行；复核包内保留 **65 个 LICENSE 文件** |
+
+修正后的实测结果：
+
+| 指标 | 修正前 | 修正后 |
+|---|---|---|
+| zip 体积 | 113.30 MB | **107.40 MB** |
+| 包内文件数 | 966 | 715 |
+| `runtime/node_modules` | 21.21 MB | **1.21 MB** |
+| 包内第三方 LICENSE | 0（被误删） | **65** |
+| 静态核对 | FAIL | **PASS** |
+
+其他打包修正：
+
+- 补上应用图标（`win.icon: assets/icon-256.png`）；打包日志不再出现 `default Electron icon is used`；
+- exe 元数据：`ProductName=LinOS MCP`、`FileVersion=0.1.0`。
+
+---
+
+## 6.1 打包产物冒烟（已做）
+
+用**打包后的 exe**（`ELECTRON_RUN_AS_NODE=1`）直接启动包内 runtime，验证"精简后的 node_modules 仍能跑"：
+
+```
+LinOS MCP.exe resources\app\runtime\dist\main.js \
+  --workspace <temp> --device-id smoke-dev --profile-id smoke-prof \
+  --runtime-id smoke-rt --runtime-instance-id smoke-inst-001 \
+  --port 48899 --state-root <temp>
+```
+
+| 观察项 | 结果 |
+|---|---|
+| 进程启动 | 未退出，PID 正常 |
+| 端口监听 | `127.0.0.1:48899 Listen` |
+| `/health` | `200 {"service":"c2c-bridge","version":"2.0.0","status":"ok",...}` |
+| 结束后端口释放 | 监听数 0 |
+
+> `/health` 里的 `"service":"c2c-bridge"` 是**刻意保留**的服务识别字段（`ServiceDiscovery` 用它区分自身与旧桥），见 `docs/LEGACY_IDENTIFIER_POLICY.md` 类别 J。
+
+**卸载/无残留核对（便携形态）**：
+
+| 检查 | 结果 |
+|---|---|
+| `HKCU\Software\com.linos.mcp.portable` | 不存在 |
+| `HKCU\Software\LinOS MCP` | 不存在 |
+| 卸载列表中的本项目条目 | 无（同一机器上另有第三方 `LinOS Handoff Hub` 条目，与本项目无关） |
+| 进程/端口残留 | 无 |
+| 状态目录 | 只写调用方指定的 `--state-root`，不写用户目录 |
+
+---
+
+## 7. 干净 Windows 环境验证（未完成，发布阻断）
+
+上面 §6/§6.1 已覆盖"包内容正确 + 包内 runtime 能启动 + 无系统残留"，但**仍不是干净机器验证**。发布前还需在无开发环境残留的机器/虚拟机上完成：
 
 | 步骤 | 验收点 | 状态 |
 |---|---|---|
-| 下载 zip → 解压到新目录 | 不依赖 `node_modules`、不依赖已装 Node | ⏳ 待做 |
-| 首次启动 | 生成 Profile、选工作区、端口默认 48766、无残留旧配置 | ⏳ 待做 |
-| 连接 MCP 客户端 | 至少两个不同客户端（如 ChatGPT + 任意 MCP 客户端）能连上并列出工具 | ⏳ 待做 |
+| 下载 zip → 解压到新目录 | 不依赖 `node_modules`、不依赖已装 Node | ⏳ 待做（需干净机器） |
+| 首次启动 GUI | 生成 Profile、选工作区、端口默认 48766、无残留旧配置 | ⏳ 待做 |
+| 连接 MCP 客户端 | 至少两个不同客户端能连上并列出工具 | ⏳ 待做 |
 | 只读工具可用 | `read_file` / `git_status` 正常 | ⏳ 待做 |
 | 写入需确认 | 未开启写入时拒绝；开启后两阶段写入成功 | ⏳ 待做 |
 | 审计可查 | `GET /admin/tool-audit` 返回 `ok=true` 且 `durability=FILE_SYNC_ONLY`（Windows） | ⏳ 待做 |
 | 升级（覆盖解压） | 保留 Profile/工作区配置与审计链 | ⏳ 待做 |
-| 卸载（删除目录） | 无注册表残留、无后台进程、无计划任务 | ⏳ 待做 |
-
-本机已有 `scripts/verify-portable-package.ps1`，可在打包后先做静态核对（文件清单、缺失依赖、`asar` 状态），但不能替代上述干净环境验证。
+| 卸载（删除目录） | 无注册表残留、无后台进程、无计划任务 | ✅ 便携形态已核对（§6.1），VM 复核待做 |
 
 ---
 

@@ -36,10 +36,7 @@
     "lint": "eslint src runtime/src"
   },
   "dependencies": {
-    "mysql2": "^3.24.6",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "7.18.4"
+    "mysql2": "^3.24.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
@@ -54,6 +51,9 @@
     "eslint": "^9.39.5",
     "happy-dom": "^15.7.4",
     "playwright-core": "^1.63.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "7.18.4",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.72.1",
     "vite": "^5.4.8",
