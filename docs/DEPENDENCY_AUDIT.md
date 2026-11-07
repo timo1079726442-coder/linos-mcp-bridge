@@ -108,12 +108,15 @@
 
 ## 6. 密钥扫描（Gitleaks）现状与替代方案
 
-- 本机**未安装** `gitleaks` / `trufflehog` / `semgrep` / `osv-scanner`，无法直接跑官方规则集；
-- v0.1.1 门禁要求：**全历史 + 全分支 + 全 tag 的密钥扫描**，这条**尚未完成**，不得宣称通过；
-- 计划（按优先级）：
-  1. 在 CI 中加 `gitleaks detect --log-opts="--all"`，并把 `gitleaks.toml` 纳入仓库；
-  2. 本地先用等价正则扫描兜底：`AKIA[0-9A-Z]{16}`、`ghp_[A-Za-z0-9]{36}`、`sk-[A-Za-z0-9]{20,}`、`-----BEGIN [A-Z ]*PRIVATE KEY-----`、`c2c_api_[A-Za-z0-9]{20,}`、`password\s*[:=]\s*["'][^"']{6,}`；
-  3. 任何命中先判定"测试夹具 / 示例 / 真实凭据"，真实凭据必须轮换并从历史清除（`git filter-repo`），且因为本分支从未推送，清除成本可控。
+- 本机**未安装** `gitleaks` / `trufflehog` / `semgrep` / `osv-scanner`；
+- 因此实现了本地等价扫描：`scripts/secret-scan.mjs`，用 `git grep` 跨**全部 refs（9 个：5 本地分支 + 3 远程 + 1 tag）与全部 33 个提交**搜索 10 类凭据模式；
+- **扫描结果（2026-11-07）**：
+  - 命中 7 条，全部为测试夹具（`dead-token`、`stale-token`、`c2c_at_inner_token_xyz`、`a-strong-password`、`must not be accepted`）；
+  - 未允许命中 **0 条**，退出码 0；
+  - 报告会保留这些命中并标 `allowed=true`，不做静默丢弃，便于评审复核；
+- 覆盖的规则：AWS Access Key、GitHub token/PAT、OpenAI key、Slack token、PEM 私钥块、Cloudflare 隧道令牌、JWT 形态、本项目 `c2c_api_` 令牌、`password/secret/token` 赋值；
+- 待补：CI 中接入官方 `gitleaks detect --log-opts="--all"` 并提交 `gitleaks.toml`（官方规则集覆盖面大于本地 10 条）；
+- 若将来出现真实凭据：必须**轮换**并从历史清除（`git filter-repo`）；本分支尚未推送，清理成本可控。
 
 ---
 
@@ -143,5 +146,5 @@ Select-String -Path electron-builder.yml -Pattern 'files:' -Context 0,12
 | 根工程生产依赖漏洞 | ✅ 0（未使用依赖已移除） |
 | 根工程 dev 依赖漏洞 | ⚠️ 21 项，登记为 v0.2 工程债 |
 | Electron 外壳版本 | ⚠️ 待决策（v0.1.1 维持 33 / v0.2 升级） |
-| 全历史密钥扫描 | ❌ 未完成（工具未安装，需 CI 或本地等价扫描） |
+| 全历史密钥扫描 | ✅ 本地等价扫描完成（9 refs / 33 commits，未允许命中 0）；官方 gitleaks 接入 CI 待办 |
 | 打包内容最小化 | ✅ `files` 不含 `node_modules`，`runtime/node_modules` 已显著缩小 |
