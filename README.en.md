@@ -70,6 +70,28 @@ It checks Node, installs dependencies, builds runtime + app, and prints the exac
 
 Details and troubleshooting: [docs/INSTALL.md](docs/INSTALL.md).
 
+## Download and verify (portable)
+
+If you would rather not build from source, use the release artifact:
+
+| File | Purpose |
+|---|---|
+| `LinOS-MCP-Portable-<version>-x64.zip` | Unzip and run. No Node.js install, no registry writes |
+| `SHA256SUMS.txt` | Verify the download is intact and untampered |
+| `sbom.json` | Dependency inventory (CycloneDX) for third-party review |
+
+```powershell
+Get-FileHash .\LinOS-MCP-Portable-0.1.1-x64.zip -Algorithm SHA256   # must match SHA256SUMS.txt
+Expand-Archive .\LinOS-MCP-Portable-0.1.1-x64.zip -DestinationPath D:\LinOS-MCP
+# then run D:\LinOS-MCP\LinOS MCP.exe
+```
+
+Two things to know up front:
+
+- **Not code-signed yet**: the first launch shows the SmartScreen "unknown publisher" prompt. Verify the SHA256 above; signing is planned for a later release.
+- **Windows audit durability**: the audit journal `fsync`s file contents, but Windows cannot `fsync` directory entries, so the runtime reports `FILE_SYNC_ONLY`. Tamper detection and fail-closed behaviour (high-risk calls are refused when auditing cannot be persisted) are unaffected.
+
+
 ## Connect ChatGPT
 
 1. Control center → **连接授权 / Connect** → generate pairing code;

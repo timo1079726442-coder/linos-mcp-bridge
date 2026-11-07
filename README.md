@@ -70,6 +70,32 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
 
 完整步骤与排错见 **[docs/INSTALL.md](docs/INSTALL.md)**。
 
+## 下载与校验（便携包）
+
+不想自己构建的话，用 Release 里的便携包：
+
+| 文件 | 说明 |
+|---|---|
+| `LinOS-MCP-Portable-<version>-x64.zip` | 解压即用，无需安装 Node.js，不写注册表 |
+| `SHA256SUMS.txt` | 校验下载是否完整、是否被篡改 |
+| `sbom.json` | 依赖清单（CycloneDX），可核对第三方组件 |
+
+```powershell
+# 1) 校验哈希，必须与 SHA256SUMS.txt 一致
+Get-FileHash .\LinOS-MCP-Portable-0.1.1-x64.zip -Algorithm SHA256
+
+# 2) 解压到普通目录（不要放 Program Files）
+Expand-Archive .\LinOS-MCP-Portable-0.1.1-x64.zip -DestinationPath D:\LinOS-MCP
+
+# 3) 双击 D:\LinOS-MCP\LinOS MCP.exe
+```
+
+两点需要提前知道：
+
+- **未做代码签名**：首次运行会出现 SmartScreen「未知发布者」，请先用上面的 SHA256 核对；正式签名在后续版本跟进。
+- **Windows 审计持久性**：审计日志会 `fsync` 文件内容，但 Windows 不支持目录项 `fsync`，因此报告 `FILE_SYNC_ONLY`。这不影响"篡改可被发现"和"审计不可写时拒绝执行高风险操作"。
+
+
 ## 接入 ChatGPT
 
 1. 控制中心「连接授权」→ 生成配对码；
