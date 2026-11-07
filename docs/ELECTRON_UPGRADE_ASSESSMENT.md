@@ -153,7 +153,70 @@ powershell -ExecutionPolicy Bypass -File scripts\verify-portable-assets.ps1 -Zip
 
 ---
 
-## 8. 对门禁表的影响
+## 9. 实施记录：E1–E3（分支 `release/v0.2-electron45`）
+
+执行时间：2026-11-07。分支从 `release/v0.1.1-hardening` 的 `bf25fab` 切出，未合并、未推送。
+
+### E1 升级与代码修正（提交 `920e18e`）
+
+```diff
+- "electron": "^33.0.0"
++ "electron": "45.2.3"
+
+  app.setLoginItemSettings({
+    openAtLogin: values.atLogin === true,
+-   openAsHidden: values.minimized === true,
+    path: process.execPath,
+    args: values.minimized === true ? ["--hidden"] : [],
+  });
+```
+
+| 验证 | 结果 |
+|---|---|
+| `npm run typecheck` | ✅ 0 error |
+| `npm run lint` | ✅ 0 error / 277 warning（较基线 +2 警告，无新增错误） |
+| `npm test` | ✅ 76 文件 / 415 passed / 4 skipped |
+| 内嵌运行时 | Electron 45.2.3 / Node **24.22.2** |
+
+### E2 稳定性：10 轮（Node 运行）
+
+| 项 | 结果 |
+|---|---|
+| 轮次 | 10 轮串行、失败即停 |
+| 每轮 | **154/154 通过**，`exit=0` |
+| 耗时 | 31.0s – 64.1s / 轮 |
+| 日志 | `%TEMP%\e45-node10-20261107-150900\round-01..10.log` |
+
+**环境限制（已实测，非产品缺陷）**：无法用开发目录里的 `electron.exe` 跑测试套件。`ELECTRON_RUN_AS_NODE=1` 下该进程访问 `%TEMP%` 时全部返回 `EPERM`：
+
+```json
+{ "mkdtemp": "EPERM", "mkdir": "EPERM", "writeFile": "EPERM" }
+```
+
+导致 114 个用例因 `mkdtemp` 失败。因此"在目标 Electron 内嵌 Node 上跑全量单测"这条路在本机不可行；Electron 侧的真实性由 E3（打包后运行）覆盖。
+
+### E3 打包与冒烟
+
+| 项 | 结果 |
+|---|---|
+| `npm run build:portable` | ✅ |
+| 静态门禁 | ✅ `STATIC-CHECK=PASS`（715 文件、11 项必需文件、无禁止项） |
+| zip | 147.33 MB，`sha256=4de3e1f8…7f500c` |
+| 包内 runtime 冒烟 | ✅ `/health` 200；state 目录写出 `exec_runtime_ready.json`；`node=24.22.2` |
+| 进程结束 | ✅ 端口 48903 释放为 0 |
+
+### 结论与剩余（E4–E6）
+
+E1–E3 全部通过：升级改动面小、行为可验证。剩余：
+
+| 阶段 | 内容 | 状态 |
+|---|---|---|
+| E4 | 干净 Windows 安装/使用/升级/卸载（按 `docs/CLEAN_WINDOWS_ACCEPTANCE.md` 15 项） | ⏳ 需干净机器 |
+| E5 | 渲染层人工回归（IPC/权限/审批/诊断页） | ⏳ 需人工过界面 |
+| E6 | 体积决策：接受 zip 107.40 → 147.33 MB，或评估裁剪语言包/资源 | ⏳ 待决策 |
+
+在 E4–E6 完成前，`release/v0.2-electron45` 不合并到 `main`、不发布；v0.1.1 仍基于 Electron 33。
+
 
 | 门禁 | 变化 |
 |---|---|
