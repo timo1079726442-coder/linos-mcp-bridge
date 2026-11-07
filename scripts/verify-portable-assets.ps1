@@ -82,6 +82,24 @@ $ts = @(Get-ChildItem -Path (Join-Path $app "runtime\dist") -Recurse -File -Filt
 if ($ts.Count -gt 0) { $violations += "typescript sources found in runtime/dist: $($ts.Count)" }
 if (Test-Path (Join-Path $app "runtime\node_modules\@modelcontextprotocol")) { $violations += "removed dep still shipped: @modelcontextprotocol" }
 if (Test-Path (Join-Path $app "runtime\node_modules\zod")) { $violations += "removed dep still shipped: zod" }
+
+# Renderer integrity: every asset referenced by index.html must exist in the package.
+# A missing bundle is the most common cause of a white window after packaging.
+$rendererIndex = Join-Path $app "dist\renderer\index.html"
+if (-not (Test-Path $rendererIndex)) {
+  $violations += "renderer index.html missing"
+} else {
+  $html = Get-Content -Path $rendererIndex -Raw
+  $refs = [regex]::Matches($html, '(?:src|href)="([^"]+)"') | ForEach-Object { $_.Groups[1].Value } |
+    Where-Object { $_ -notmatch '^(https?:|data:|#)' } |
+    ForEach-Object { $_.TrimStart('/') } |
+    ForEach-Object { $_ -replace '^\./', '' }
+  foreach ($ref in $refs) {
+    $candidate = Join-Path (Join-Path $app "dist\renderer") $ref
+    if (-not (Test-Path $candidate)) { $violations += "renderer asset missing: $ref" }
+  }
+  Write-Output "renderer asset refs checked: $(@($refs).Count)"
+}
 if ($violations.Count -gt 0) {
   $violations | ForEach-Object { Write-Output "  VIOLATION $_" }
   throw "package content violations: $($violations.Count)"

@@ -5,6 +5,10 @@ appId: com.linos.mcp.portable
 productName: LinOS MCP
 copyright: Copyright © 2026 LinOS
 artifactName: LinOS-MCP-Portable-${version}-${arch}.${ext}
+# 界面只有中文/英文，其余 Chromium 语言包不打包（体积优化）
+electronLanguages:
+  - zh-CN
+  - en-US
 
 directories:
   output: release-portable
