@@ -66,3 +66,6 @@ release-portable/
 *.zip
 !extension/
 
+
+# runtime/src 下的编译残留（源码只用 .ts，产物进 runtime/dist）
+runtime/src/**/*.js

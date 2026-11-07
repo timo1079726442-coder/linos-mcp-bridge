@@ -36,13 +36,10 @@
     "lint": "eslint src runtime/src"
   },
   "dependencies": {
-    "commander": "^12.0.0",
-    "express": "^4.21.0",
     "mysql2": "^3.24.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "7.18.4",
-    "zustand": "^5.0.0"
+    "react-router-dom": "7.18.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
