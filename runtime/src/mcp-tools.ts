@@ -26,6 +26,7 @@ import {
   shadcnLocalComponents,
   shadcnProjectInfo,
 } from "./advanced-tools.js";
+import { isIgnored, parseIgnoreRules } from "./ignore-rules.js";
 import {
   cancelPendingOperation,
   commitOperation,
@@ -756,11 +757,18 @@ async function dispatchMcpInner(
           },
           {
             name: "directory_tree",
-            description: "列出授权工作区目录树，限定深度与节点数量，跳过敏感目录与符号链接。",
+            description: "列出授权工作区目录树，限定深度与节点数量，跳过敏感目录与符号链接；默认按 .gitignore 过滤，可追加 ignore 规则。",
             inputSchema: objectSchema({
               path: { type: "string", description: "相对起始目录，默认根目录" },
               max_depth: { type: "integer", minimum: 1, maximum: 5 },
               max_entries: { type: "integer", minimum: 1, maximum: 500 },
+              ignore: {
+                type: "array",
+                maxItems: 50,
+                items: { type: "string" },
+                description: "追加忽略规则（gitignore 子集，支持 ! 反向包含），例如 node_modules、*.log、build/",
+              },
+              use_gitignore: { type: "boolean", description: "是否读取工作区根的 .gitignore，默认 true" },
             }),
           },
           {
@@ -2457,7 +2465,20 @@ async function directoryTree(args: Record<string, unknown>, ws: WorkspaceContext
   if (!(await fs.stat(start.absolute)).isDirectory()) throw new McpSecurityError("not_a_directory");
   const maxDepth = ws.boundary.limit(args.max_depth, 3, 5);
   const maxEntries = ws.boundary.limit(args.max_entries, 200, 500);
+  // 忽略规则：默认读取工作区根的 .gitignore，调用方可以用 ignore 追加（也支持 ! 反向包含）。
+  const ruleLines: string[] = [];
+  if (args.use_gitignore !== false) {
+    const gitignore = await fs.readFile(path.join(ws.boundary.rootReal, ".gitignore"), "utf8").catch(() => "");
+    if (gitignore) ruleLines.push(...gitignore.split(/\r?\n/));
+  }
+  if (Array.isArray(args.ignore)) {
+    for (const entry of args.ignore) {
+      if (typeof entry === "string" && entry.trim()) ruleLines.push(entry);
+    }
+  }
+  const ignoreRules = parseIgnoreRules(ruleLines);
   const entries: Array<{ path: string; type: "directory" | "file"; depth: number }> = [];
+  let ignoredCount = 0;
   async function walk(dir: string, depth: number): Promise<void> {
     if (depth > maxDepth || entries.length >= maxEntries) return;
     const found = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
@@ -2468,12 +2489,23 @@ async function directoryTree(args: Record<string, unknown>, ws: WorkspaceContext
       const relative = path.relative(ws.boundary.rootReal, absolute).replaceAll("\\", "/");
       if (ws.boundary.sensitivePaths.isSensitive(relative)) continue;
       if (!item.isDirectory() && !item.isFile()) continue;
-      entries.push({ path: relative, type: item.isDirectory() ? "directory" : "file", depth });
-      if (item.isDirectory() && depth < maxDepth) await walk(absolute, depth + 1);
+      const isDirectory = item.isDirectory();
+      if (ignoreRules.length > 0 && isIgnored(relative, isDirectory, ignoreRules)) {
+        ignoredCount += 1;
+        continue;
+      }
+      entries.push({ path: relative, type: isDirectory ? "directory" : "file", depth });
+      if (isDirectory && depth < maxDepth) await walk(absolute, depth + 1);
     }
   }
   await walk(start.absolute, 1);
-  return { root: start.relative, entries, count: entries.length, truncated: entries.length >= maxEntries };
+  return {
+    root: start.relative,
+    entries,
+    count: entries.length,
+    truncated: entries.length >= maxEntries,
+    ...(ignoredCount > 0 ? { ignored: ignoredCount } : {}),
+  };
 }
 
 async function readBoundedOrdinaryFile(input: unknown, ws: WorkspaceContext): Promise<{ relative: string; bytes: Buffer }> {
