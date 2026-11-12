@@ -284,7 +284,7 @@ test("已认证客户端的 tools/list 包含暂存-提交工具", async () => {
     ]) {
       assert.ok(names.includes(name), name);
     }
-    assert.equal(listed.tools.length, 75);
+    assert.equal(listed.tools.length, 76);
     const commit = listed.tools.find((tool) => tool.name === "commit_operation");
     assert.deepEqual(commit.inputSchema.required, ["operation_id"]);
     assert.equal(commit.inputSchema.additionalProperties, false);

@@ -36,6 +36,7 @@ import {
   prepareBatchWrite,
   prepareReplacements,
   prepareScaffold,
+  prepareEdit,
   prepareWrite,
   WriteOperationError,
   type WriteContext,
@@ -182,6 +183,7 @@ export const TOOL_INVENTORY: ReadonlyArray<{
   { name: "batch_prepare_write", conditional: true, group: "写入", approval: "auto", description: "一次暂存多个文件写入（最多 25 个）：只做校验与预演，不落盘。" },
   { name: "batch_replace_text", conditional: true, group: "写入", approval: "auto", description: "暂存批量精确文本替换：每个查找串必须恰好命中一次；预演不落盘。" },
   { name: "prepare_project_scaffold", conditional: true, group: "写入", approval: "auto", description: "暂存 PROJECT.md / LLM.md / STATUS.md / .brainn/project.json 的项目骨架，不创建目录、不落盘。" },
+  { name: "prepare_edit", conditional: true, group: "写入", approval: "auto", description: "暂存一次模糊块替换：find 按折叠空白后的行匹配，必须唯一命中；只预演不落盘。" },
   { name: "list_pending_operations", conditional: false, group: "写入", approval: "auto", description: "列出当前客户端尚未提交的写入草稿（只有元数据，没有正文）。" },
   { name: "cancel_pending_operation", conditional: false, group: "写入", approval: "auto", description: "丢弃当前客户端的一笔写入草稿，不改动任何文件。" },
   { name: "commit_operation", conditional: true, group: "写入", approval: "manual", description: "提交一笔已暂存的写入；重新校验目标版本、本机确认后落盘并读回复核。" },
@@ -583,6 +585,9 @@ async function dispatchMcpInner(
           break;
         case "prepare_project_scaffold":
           data = await prepareScaffold(writeCtx, rest);
+          break;
+        case "prepare_edit":
+          data = await prepareEdit(writeCtx, rest);
           break;
         case "list_pending_operations":
           data = listPendingOperations(writeCtx);
@@ -1183,6 +1188,18 @@ async function dispatchMcpInner(
             ),
           },
           {
+            name: "prepare_edit",
+            description: "暂存一次模糊块替换：find 按折叠空白后的行匹配（容忍缩进/行尾空白差异），必须唯一命中；只预演不落盘，需 commit_operation 提交。",
+            inputSchema: objectSchema(
+              {
+                path: { type: "string", description: "工作区内相对路径（必须已存在）" },
+                find: { type: "string", description: "要替换的原始块（多行）；空白差异会被容忍" },
+                replace: { type: "string", description: "替换后的块；空字符串表示删除该块" },
+              },
+              ["path", "find", "replace"],
+            ),
+          },
+          {
             name: "batch_replace_text",
             description: "暂存批量精确替换：每个 find 必须恰好命中一次；只生成草稿，不落盘。",
             inputSchema: objectSchema(
@@ -1471,6 +1488,7 @@ const WRITE_SCOPE_TOOL_NAMES = new Set([
   "batch_prepare_write",
   "batch_replace_text",
   "prepare_project_scaffold",
+  "prepare_edit",
   "cancel_pending_operation",
   "commit_operation",
   "commit_operations",
