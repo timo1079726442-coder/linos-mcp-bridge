@@ -108,6 +108,38 @@ on:
 
 修复后压测：并发用例 **25/25 通过**（修前 20 次里失败 1 次），runtime 全量 **188/188 连续 10 轮**。
 
+### 4.4 第四轮：Node 20 的 `EPERM` 才是真正的根因
+
+`verify (20)` 仍在偶发失败，报 `AUDIT_UNAVAILABLE`。**只有拿到真实错误消息才能定位**，所以先把 worker 的异常消息带到父进程（`errorMessage` 字段，截断 200 字符、不含文件内容），然后在本机下载 Node 20.19.5 复现：
+
+```
+AuditJournalError: AUDIT_UNAVAILABLE:
+EPERM: operation not permitted, open '...\audit\workspace_multi.journal.jsonl.lock'
+```
+
+根因：Windows 上并发创建/删除同一个文件时，`fs.open(path, "wx")` 可能返回 **`EPERM`/`EACCES`/`EBUSY` 而不是 `EEXIST`**（删除共享语义所致）。代码只把 `EEXIST` 当"没抢到锁"，其它错误直接抛出，整次追加就失败了。
+
+修复：这三类错误与 `EEXIST` 同等对待，进入既有重试循环。
+
+| 验证 | 结果 |
+|---|---|
+| Node 20 并发用例压测 | 修前 **2/20 失败** → 修后 **30/30 通过** |
+| Node 20 全量（走 `scripts/run-tests.mjs`，与 CI 同入口） | **190/190 × 3 轮** |
+| Node 24 全量 | **190/190 × 10 轮** |
+| CI | `verify (20)` ✅ `verify (24)` ✅ `security` ✅ |
+
+**本地复现配方**（下次遇到版本相关问题直接用）：
+
+```powershell
+# 下载官方 Node 20 到临时目录，不改动系统 PATH
+Invoke-WebRequest https://nodejs.org/dist/v20.19.5/node-v20.19.5-win-x64.zip -OutFile $env:TEMP\node20.zip
+Expand-Archive $env:TEMP\node20.zip -DestinationPath $env:TEMP\node20 -Force
+$n20 = "$env:TEMP\node20\node-v20.19.5-win-x64\node.exe"
+& $n20 scripts/run-tests.mjs      # 在 runtime/ 下执行
+```
+
+顺带修掉 `runtime/test/smoke.mjs`：它 import 的是重构前的 `../dist/src/server.js`，这条路径早已不存在，所以该文件**从来没能跑通**（`run-tests.mjs` 只收 `*.test.js`，它不在 CI 里）。路径改对后 Node 20/24 均可正常运行冒烟检查。
+
 ---
 
 ## 5. 本地等价命令（提交前自检）

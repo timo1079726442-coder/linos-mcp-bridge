@@ -4,7 +4,33 @@
 
 ---
 
-## v0.1.5 — 待发布
+## v0.1.6 — 待发布
+
+### 新增
+
+- **`audit_project_structure` / `generate_project_inventory` 接入同一套忽略规则**（`use_gitignore` / `ignore[]`）：被忽略目录里的测试不再让 `Has tests` 变绿，清单也不再列出噪声目录。
+  - 明确**不接**忽略规则的三个工具：`detect_archive_candidates`、`list_artifacts`、`read_latest_report`——它们的职责就是查找构建产物与残留，套上 gitignore 会把目标本身过滤掉；`batchSearchPatterns` 同样保持现状（搜内容时被忽略文件仍可命中）。
+
+### 修复
+
+- **Node 20 上审计锁的 `EPERM`**（CI 双版本矩阵暴露的真根因）：Windows 上并发创建/删除同一文件时，`fs.open(path, "wx")` 可能返回 `EPERM`/`EACCES`/`EBUSY` 而不是 `EEXIST`。此前只把 `EEXIST` 当作"没抢到锁"，其它错误直接抛出，整次审计追加失败。现在这三类与 `EEXIST` 同等对待，进入既有重试循环。
+- **审计失败不再丢诊断信息**：worker 抛非预期异常时会带上截断后的消息（`errorMessage`，最长 200 字符、不含文件内容），此前只剩一句 `AUDIT_UNAVAILABLE`。
+- **`runtime/test/smoke.mjs` 修复**：它 import 的是重构前的 `../dist/src/server.js`，该路径早已不存在，因此从未真正跑通过。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| Node 20 并发用例压测 | 修前 **2/20 失败** → 修后 **30/30 通过** |
+| Node 20 全量（与 CI 同入口） | **190/190 × 3 轮** |
+| Node 24 全量 | **190/190 × 10 轮**（31.8–37.2s/轮） |
+| 应用测试 | 419 passed / 4 skipped |
+| typecheck / lint | 通过 / 0 error |
+| CI | `verify (20)` ✅ `verify (24)` ✅ `security` ✅ |
+
+---
+
+## v0.1.5 — 已发布
 
 ### 修复
 
