@@ -138,3 +138,53 @@ describe("Diagnostics (P0-D no hardcoded PASS)", () => {
     expect(first.profileId).not.toBe(selected.profileId);
   });
 });
+
+describe("Diagnostics local probe retry (startup window)", () => {
+  it("single failed probe followed by success reports runtime PASS", async () => {
+    const stateRoot2 = await mkdtemp(join(tmpdir(), "c2c-diag-retry-"));
+    const device = new DeviceIdentity(stateRoot2);
+    await device.getDeviceId();
+    const store = new ProfileStore(stateRoot2, device);
+    await store.create({ profileName: "RETRY", profileType: "custom" });
+    let calls = 0;
+    const diag = new Diagnostics({
+      stateRoot: stateRoot2,
+      localProbeRetryDelayMs: 0,
+      probe: {
+        probeLocalBridge: async (port: number) => {
+          calls += 1;
+          // 第一次模拟"应用刚启动、端口还没监听"，第二次正常。
+          if (calls === 1) return { alive: false, healthEndpointOk: false, workspaceIdMatches: null, port, portListening: false };
+          return { alive: true, healthEndpointOk: true, workspaceIdMatches: true, port, portListening: true };
+        },
+        probePublic: async () => ({ healthStatus: null, mcpAnonymous: null, oauthDiscoveryOk: false }),
+      },
+    });
+    const report = await diag.run();
+    expect(calls).toBe(2);
+    expect(report.readiness.layers.runtime).toBe("PASS");
+  });
+
+  it("two consecutive failed probes still report runtime FAIL", async () => {
+    const stateRoot3 = await mkdtemp(join(tmpdir(), "c2c-diag-fail-"));
+    const device = new DeviceIdentity(stateRoot3);
+    await device.getDeviceId();
+    const store = new ProfileStore(stateRoot3, device);
+    await store.create({ profileName: "FAIL", profileType: "custom" });
+    let calls = 0;
+    const diag = new Diagnostics({
+      stateRoot: stateRoot3,
+      localProbeRetryDelayMs: 0,
+      probe: {
+        probeLocalBridge: async (port: number) => {
+          calls += 1;
+          return { alive: false, healthEndpointOk: false, workspaceIdMatches: null, port, portListening: false };
+        },
+        probePublic: async () => ({ healthStatus: null, mcpAnonymous: null, oauthDiscoveryOk: false }),
+      },
+    });
+    const report = await diag.run();
+    expect(calls).toBe(2);
+    expect(report.readiness.layers.runtime).toBe("FAIL");
+  });
+});

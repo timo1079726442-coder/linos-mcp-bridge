@@ -29,6 +29,8 @@ export interface DiagnosticsContext {
   /** Optional reverse-heartbeat probe for the independent Watchdog. */
   watchdogProbe?: () => Promise<{ alive: boolean; lastHeartbeatAt: string | null; status: "ALIVE" | "DEAD" | "UNKNOWN" | "NOT_STARTED" }>;
   /** Health probe; default probes localhost for real production. */
+  /** 覆盖本地探测重试间隔（仅测试用）。 */
+  localProbeRetryDelayMs?: number;
   probe?: { probeLocalBridge: (port: number, wid: string | null) => Promise<{ alive: boolean; healthEndpointOk: boolean; workspaceIdMatches: boolean | null; port: number | null; portListening?: boolean | null }>; probePublic: (url: string | null) => Promise<{ healthStatus: number | null; mcpAnonymous: number | null; oauthDiscoveryOk: boolean }>; toLayerStateFromHealth?: () => "PASS" | "DEGRADED" | "FAIL" | "UNKNOWN" | "NOT_APPLICABLE" };
 }
 
@@ -39,6 +41,8 @@ export class Diagnostics {
   private readonly supervisorStartedAt?: string;
   private readonly watchdogProbe?: DiagnosticsContext["watchdogProbe"];
   // P0-D: probe is overridable for tests; default probes localhost.
+  /** 本地探测失败后的重试间隔（毫秒）；测试可覆盖为 0。 */
+  private readonly localProbeRetryDelayMs: number;
   private readonly probe: { probeLocalBridge: (port: number, wid: string | null) => Promise<{ alive: boolean; healthEndpointOk: boolean; workspaceIdMatches: boolean | null; port: number | null; portListening?: boolean | null }>; probePublic: (url: string | null) => Promise<{ healthStatus: number | null; mcpAnonymous: number | null; oauthDiscoveryOk: boolean }>; toLayerStateFromHealth?: (...args: unknown[]) => unknown };
 
   constructor(ctx: DiagnosticsContext) {
@@ -48,12 +52,27 @@ export class Diagnostics {
     this.supervisorStartedAt = ctx.supervisorStartedAt;
     this.watchdogProbe = ctx.watchdogProbe;
     this.probe = (ctx.probe ?? new HealthProbe()) as Diagnostics["probe"];
+    this.localProbeRetryDelayMs = ctx.localProbeRetryDelayMs ?? 1200;
   }
 
   /**
    * Real diagnostics: every field is probed. UNKNOWN means we cannot determine
    * the state at this moment; PASS/FAIL only if a real measurement supports it.
    */
+  /**
+   * 本机 runtime 探测：首次失败后延迟重试一次。
+   * 只用于消除"启动瞬间端口未监听"的误报；两次都失败仍然如实报告失败。
+   */
+  private async probeLocalBridgeWithRetry(
+    port: number,
+    workspaceId: string | null,
+  ): Promise<{ alive: boolean; healthEndpointOk: boolean; workspaceIdMatches: boolean | null; port: number | null; portListening?: boolean | null }> {
+    const first = await this.probe.probeLocalBridge(port, workspaceId);
+    if (first.healthEndpointOk) return first;
+    await new Promise((resolve) => setTimeout(resolve, this.localProbeRetryDelayMs));
+    return await this.probe.probeLocalBridge(port, workspaceId);
+  }
+
   async run(): Promise<DiagnosticsReport> {
     const device = new DeviceIdentity(this.stateRoot);
     await device.getDeviceId();
@@ -78,8 +97,11 @@ export class Diagnostics {
     const workspaceId = profile?.currentWorkspace.workspaceId ?? null;
 
     // Runtime: probe the local bridge if we know the port.
+    // 单次探测失败不足以判定 FAIL：应用/运行时刚启动的那几秒端口必然还没监听，
+    // 之前会因此把"本机服务"钉成 FAIL（用户看到的就是"本地 Runtime 没有响应"）。
+    // 这里做一次有界重试，两次都失败才算真的没起来。
     const local = port
-      ? await probe.probeLocalBridge(port, workspaceId)
+      ? await this.probeLocalBridgeWithRetry(port, workspaceId)
       : { alive: false, healthEndpointOk: false, workspaceIdMatches: null, port: null, portListening: null };
     const supState = this.supervisor && typeof (this.supervisor as { getState?: unknown }).getState === "function"
       ? (this.supervisor as unknown as { getState: () => SupervisorState }).getState()
