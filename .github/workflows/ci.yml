@@ -142,7 +142,7 @@ jobs:
           "$hash  $($zip.Name)" | Set-Content dist-release\SHA256SUMS.txt -Encoding ascii
           Get-Content dist-release\SHA256SUMS.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: portable-package
           path: |
