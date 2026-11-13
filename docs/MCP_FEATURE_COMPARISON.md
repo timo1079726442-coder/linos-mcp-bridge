@@ -104,6 +104,17 @@
 
 ---
 
+### 3.5 `project_snapshot` 与 `search_files` 的过滤能力
+
+| 工具 | 新增参数 | 作用 |
+|---|---|---|
+| `project_snapshot` | `use_gitignore`（默认 true）、`ignore[]` | 先按 gitignore 子集过滤再统计，避免 `node_modules`/`build` 污染目录树、大文件与扩展名统计 |
+| `search_files` | `modified_after`、`modified_before`（ISO-8601） | 按修改时间筛选，只找最近动过的文件；**只作用于文件**，目录不过滤（否则整棵子树消失，更难定位） |
+
+`search_files` 命中文件时返回 `modifiedAt`，被时间过滤掉的计数放在 `timeFiltered`（仅在启用过滤时出现）；非法时间戳返回 `invalid_modified_after` / `invalid_modified_before`。
+
+---
+
 ## 4. 测试
 
 新增 `runtime/test/ux-parity.test.js`（7 项）：

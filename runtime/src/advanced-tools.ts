@@ -7,6 +7,7 @@ import {
   McpSecurityBoundary,
   McpSecurityError,
 } from "./security-boundary.js";
+import { isIgnored, parseIgnoreRules, type IgnoreRule } from "./ignore-rules.js";
 
 const MAX_BATCH_READ_FILES = 50;
 const MAX_BATCH_STATUS_PATHS = 250;
@@ -201,7 +202,10 @@ export async function projectSnapshot(
   const stat = await fs.stat(root.absolute);
   if (!stat.isDirectory()) throw new McpSecurityError("not_a_directory");
 
-  const entries = await walk(root.absolute, root.relative, maxDepth, maxFiles, ctx.boundary);
+  // 忽略规则：默认读工作区根的 .gitignore，调用方可用 ignore 追加；先过滤再统计，
+  // 否则 node_modules/build 会把 tree/largeFiles/扩展名统计全部污染。
+  const ignoreRules = await projectIgnoreRules(args, ctx);
+  const entries = await walk(root.absolute, root.relative, maxDepth, maxFiles, ctx.boundary, ignoreRules);
   const extensionCounts: Record<string, number> = {};
   const tree: string[] = [];
   const importantFiles: Array<{ path: string; sizeBytes: number }> = [];
@@ -598,12 +602,31 @@ export async function readLatestReport(
   };
 }
 
+/** 项目级忽略规则：默认 .gitignore + 调用方 ignore[]，与 directory_tree 语义一致。 */
+async function projectIgnoreRules(
+  args: Record<string, unknown>,
+  ctx: AdvancedToolContext,
+): Promise<IgnoreRule[]> {
+  const lines: string[] = [];
+  if (args.use_gitignore !== false) {
+    const text = await fs.readFile(path.join(ctx.boundary.rootReal, ".gitignore"), "utf8").catch(() => "");
+    if (text) lines.push(...text.split(/\r?\n/));
+  }
+  if (Array.isArray(args.ignore)) {
+    for (const entry of args.ignore) {
+      if (typeof entry === "string" && entry.trim()) lines.push(entry);
+    }
+  }
+  return parseIgnoreRules(lines);
+}
+
 async function walk(
   absoluteRoot: string,
   relativeRoot: string,
   maxDepth: number,
   maxFiles: number,
   boundary: McpSecurityBoundary,
+  ignoreRules: readonly IgnoreRule[] = [],
 ): Promise<WalkEntry[]> {
   const entries: WalkEntry[] = [];
   let fileCount = 0;
@@ -615,6 +638,7 @@ async function walk(
       if (fileCount >= maxFiles) return;
       const childRelative = normalizeSlash(path.join(relative === "." ? "" : relative, child.name));
       if (boundary.sensitivePaths.isSensitive(childRelative)) continue;
+      if (ignoreRules.length > 0 && isIgnored(childRelative, child.isDirectory(), ignoreRules)) continue;
       if (child.isDirectory()) {
         if (isSkippableDirectory(child.name)) continue;
         entries.push({ relative: childRelative, absolute: path.join(absolute, child.name), kind: "dir", depth });

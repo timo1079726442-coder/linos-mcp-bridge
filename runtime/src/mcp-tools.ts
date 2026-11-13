@@ -743,11 +743,13 @@ async function dispatchMcpInner(
           },
           {
             name: "search_files",
-            description: "只按文件名查找工作区文件，不读取正文；自动跳过敏感目录和链接，返回结果有数量上限。",
+            description: "只按文件名查找工作区文件，不读取正文；自动跳过敏感目录和链接，返回结果有数量上限；可按修改时间过滤（仅作用于文件）。",
             inputSchema: objectSchema({
               query: { type: "string", description: "文件名包含的文字，最多 120 字符" },
               path: { type: "string", description: "搜索起点，默认工作区根目录" },
               limit: { type: "integer", minimum: 1, maximum: 100 },
+              modified_after: { type: "string", description: "只保留修改时间不早于该时刻的文件（ISO-8601，如 2026-11-01T00:00:00Z）" },
+              modified_before: { type: "string", description: "只保留修改时间不晚于该时刻的文件（ISO-8601）" },
             }, ["query"]),
           },
           {
@@ -844,11 +846,18 @@ async function dispatchMcpInner(
           },
           {
             name: "project_snapshot",
-            description: "生成工作区项目树、扩展名统计、重要文件、大文件和归档候选快照。",
+            description: "生成工作区项目树、扩展名统计、重要文件、大文件和归档候选快照；默认按 .gitignore 与 ignore 规则过滤后再统计。",
             inputSchema: objectSchema({
               path: { type: "string", description: "工作区内相对目录，默认根目录" },
               max_depth: { type: "integer", minimum: 1, maximum: 8 },
               max_files: { type: "integer", minimum: 50, maximum: 2000 },
+              ignore: {
+                type: "array",
+                maxItems: 50,
+                items: { type: "string" },
+                description: "追加忽略规则（gitignore 子集，支持 ! 反向包含），例如 node_modules、*.log",
+              },
+              use_gitignore: { type: "boolean", description: "是否读取工作区根的 .gitignore，默认 true" },
             }),
           },
           {
@@ -2527,8 +2536,23 @@ async function searchFileNames(args: Record<string, unknown>, ws: WorkspaceConte
   if (!(await fs.stat(start.absolute)).isDirectory()) throw new McpSecurityError("not_a_directory");
   const query = args.query.toLocaleLowerCase();
   const limit = ws.boundary.limit(args.limit, 50, 100);
-  const matches: Array<{ path: string; type: "file" | "directory" }> = [];
+
+  // 修改时间过滤：只作用于**文件**。目录没有"内容修改时间"的语义，
+  // 过滤目录会导致整个子树消失，反而更难找到目标。
+  const parseInstant = (value: unknown, errorCode: string): number | null => {
+    if (value === undefined || value === null || value === "") return null;
+    if (typeof value !== "string") throw new McpSecurityError(errorCode);
+    const parsed = Date.parse(value);
+    if (Number.isNaN(parsed)) throw new McpSecurityError(errorCode);
+    return parsed;
+  };
+  const modifiedAfter = parseInstant(args.modified_after, "invalid_modified_after");
+  const modifiedBefore = parseInstant(args.modified_before, "invalid_modified_before");
+  const filterTime = modifiedAfter !== null || modifiedBefore !== null;
+
+  const matches: Array<{ path: string; type: "file" | "directory"; modifiedAt?: string }> = [];
   let visited = 0;
+  let timeFiltered = 0;
   async function walk(dir: string): Promise<void> {
     if (visited >= 3000 || matches.length >= limit) return;
     const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
@@ -2539,12 +2563,37 @@ async function searchFileNames(args: Record<string, unknown>, ws: WorkspaceConte
       const candidate = path.join(dir, entry.name);
       const relative = path.relative(ws.boundary.rootReal, candidate).replaceAll("\\", "/");
       if (ws.boundary.sensitivePaths.isSensitive(relative)) continue;
-      if (entry.name.toLocaleLowerCase().includes(query)) matches.push({ path: relative, type: entry.isDirectory() ? "directory" : "file" });
+      const nameMatches = entry.name.toLocaleLowerCase().includes(query);
+      if (nameMatches) {
+        if (!filterTime) {
+          matches.push({ path: relative, type: entry.isDirectory() ? "directory" : "file" });
+        } else if (entry.isDirectory()) {
+          matches.push({ path: relative, type: "directory" });
+        } else {
+          const stat = await fs.stat(candidate).catch(() => null);
+          const mtimeMs = stat ? stat.mtimeMs : null;
+          const keeps = mtimeMs !== null
+            && (modifiedAfter === null || mtimeMs >= modifiedAfter)
+            && (modifiedBefore === null || mtimeMs <= modifiedBefore);
+          if (keeps) {
+            matches.push({ path: relative, type: "file", modifiedAt: new Date(mtimeMs!).toISOString() });
+          } else {
+            timeFiltered += 1;
+          }
+        }
+      }
       if (entry.isDirectory()) await walk(candidate);
     }
   }
   await walk(start.absolute);
-  return { query: args.query, matches, count: matches.length, scannedEntries: visited, truncated: visited >= 3000 || matches.length >= limit };
+  return {
+    query: args.query,
+    matches,
+    count: matches.length,
+    scannedEntries: visited,
+    ...(filterTime ? { timeFiltered } : {}),
+    truncated: visited >= 3000 || matches.length >= limit,
+  };
 }
 
 async function searchWorkspace(args: Record<string, unknown>, ws: WorkspaceContext): Promise<unknown> {
