@@ -4,6 +4,9 @@ on:
   push:
     branches: [main, "release/**"]
   pull_request:
+  # package 作业的条件里写了 workflow_dispatch，但触发器从未声明，
+  # 手动触发会直接 422（"Workflow does not have 'workflow_dispatch' trigger"）。
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
