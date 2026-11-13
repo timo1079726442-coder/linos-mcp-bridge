@@ -40,6 +40,8 @@ interface WorkerResponse {
   ok: boolean;
   result?: unknown;
   errorCode?: string;
+  /** 仅非预期异常时携带，便于定位（已截断，不含文件内容）。 */
+  errorMessage?: string;
 }
 
 interface PendingRequest {
@@ -127,7 +129,7 @@ function ensureWorker(): Worker {
     clearTimeout(request.timer);
     if (pending.size === 0) created.unref();
     if (response.ok) request.resolve(response.result);
-    else request.reject(new AuditJournalError(response.errorCode ?? "AUDIT_UNAVAILABLE"));
+    else request.reject(new AuditJournalError(response.errorCode ?? "AUDIT_UNAVAILABLE", [response.errorCode ?? "AUDIT_UNAVAILABLE", response.errorMessage].filter(Boolean).join(": ")));
   });
   created.on("error", (error: Error) => disposeWorker(created, new AuditJournalError("AUDIT_WORKER_FAILED", error.message)));
   created.on("exit", (code: number) => {

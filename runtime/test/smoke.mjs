@@ -1,12 +1,12 @@
 // Manual smoke test of the runtime server.
-import { startServer } from "../dist/src/server.js";
+import { startServer } from "../dist/server.js";
 
 const secret = Buffer.from(
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "hex",
 );
 const wsRoot = process.cwd();
-const { detectWorkspace } = await import("../dist/src/workspace.js");
+const { detectWorkspace } = await import("../dist/workspace.js");
 const ws = await detectWorkspace(wsRoot);
 
 const handle = await startServer({

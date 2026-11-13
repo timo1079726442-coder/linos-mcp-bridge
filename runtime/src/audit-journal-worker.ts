@@ -149,7 +149,10 @@ async function acquireLock(lockPath: string, workerId: string): Promise<() => Pr
     } catch (error) {
       if (handle) await handle.close().catch(() => undefined);
       const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "EEXIST") throw error;
+      // Windows 上并发创建/删除锁文件时，O_EXCL 打开可能返回 EPERM/EACCES/EBUSY
+      // 而不是 EEXIST（删除共享语义所致）。这些都等价于"这一轮没抢到"，
+      // 应进入重试，而不是让整次追加失败。
+      if (code !== "EEXIST" && code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") throw error;
       let metadata: LockMetadata | null;
       try {
         metadata = await readLockMetadata(lockPath);
@@ -369,6 +372,14 @@ parentPort?.on("message", (message: WorkerMessage & { workerId?: string }) => {
   queue = task.then(() => undefined, () => undefined);
   void task.then(
     (result) => parentPort?.postMessage({ id: message.id, ok: true, result }),
-    (error: unknown) => parentPort?.postMessage({ id: message.id, ok: false, errorCode: error instanceof AuditWorkerError ? error.code : "AUDIT_UNAVAILABLE" }),
+    (error: unknown) => parentPort?.postMessage({
+          id: message.id,
+          ok: false,
+          errorCode: error instanceof AuditWorkerError ? error.code : "AUDIT_UNAVAILABLE",
+          // 非预期异常此前只留下 AUDIT_UNAVAILABLE，无法定位；附带截断后的消息（不含文件内容）
+          errorMessage: error instanceof AuditWorkerError
+            ? undefined
+            : String((error as Error)?.message ?? error).slice(0, 200),
+        }),
   );
 });
