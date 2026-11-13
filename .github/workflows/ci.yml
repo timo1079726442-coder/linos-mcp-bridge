@@ -3,6 +3,9 @@ name: ci
 on:
   push:
     branches: [main, "release/**"]
+    # 只写 branches 时 tag 推送不会匹配任何过滤器，package 作业里
+    # startsWith(github.ref, 'refs/tags/v') 的条件形同虚设（v0.1.3/v0.1.4/v0.1.5 都没触发过打包）。
+    tags: ["v*"]
   pull_request:
   # package 作业的条件里写了 workflow_dispatch，但触发器从未声明，
   # 手动触发会直接 422（"Workflow does not have 'workflow_dispatch' trigger"）。
