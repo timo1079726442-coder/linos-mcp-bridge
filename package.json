@@ -1,6 +1,6 @@
 {
   "name": "linos-mcp-bridge",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Self-hosted MCP bridge: let AI clients safely use your local files, commands, Git and long-running jobs.",
   "license": "MIT",
   "author": "LinOS MCP Bridge contributors",
