@@ -4,7 +4,31 @@
 
 ---
 
-## v0.1.3 — 待发布
+## v0.1.4 — 待发布
+
+### 新增
+
+- **`project_snapshot` 支持忽略规则**：`use_gitignore`（默认 `true`）与 `ignore[]`。先过滤再统计，`node_modules`/`build` 不再污染目录树、大文件列表与扩展名统计。
+- **`search_files` 支持修改时间过滤**：`modified_after` / `modified_before`（ISO-8601）。只作用于文件——目录不参与过滤，否则整棵子树会消失，反而更难定位；命中文件返回 `modifiedAt`，被时间过滤的数量放在 `timeFiltered`；非法时间戳报 `invalid_modified_after` / `invalid_modified_before`。
+
+### 变更
+
+- **CI `verify` 改为 Node 20 + 24 双版本矩阵**：20 是 `engines` 声明的最低版本，24 是本机验证与 Electron 45 内置版本。
+- **CI 三处配置缺陷修复**（此前 CI 长期红，原因全在配置）：
+  1. `gitleaks-action@v2` 的下载地址指向已迁移的旧仓库 `zricethezav/gitleaks`，安装步骤必然 404 → 改为官方 CLI `8.30.1` + checksums 校验；
+  2. `package` 作业条件里写了 `workflow_dispatch`，但 `on:` 从未声明该触发器，手动触发直接 422 → 补上；
+  3. `checkout`/`setup-node`/`upload-artifact` 升到 v5，清除 Node 20 动作运行时弃用告警。
+- gitleaks 真正跑起来后报出 2 处命中，均为脱敏测试的合成夹具（`c2c_ri_secret_...` 的 base64 段解码为 `hellothere`），按**精确字面量**放行并注明证据位置，未加宽泛通配。
+
+### 验证
+
+- runtime 全量 **188/188**，连续 **10 轮**全绿（24.0–33.9s/轮）
+- 应用测试 **419 passed** / 4 skipped；typecheck 通过；lint 0 error
+- CI 实测：`verify (20)` ✅、`verify (24)` ✅、`security` ✅；手动触发的 `package` ✅（artifact 约 136 MB）
+
+---
+
+## v0.1.3 — 已发布
 
 ### 修复
 
