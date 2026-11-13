@@ -4,6 +4,34 @@
 
 ---
 
+## v0.1.2 — 待发布
+
+### 修复
+
+- **命名隧道连不上（公网 530 / error 1033）**：cloudflared 默认改用 **http2**。实测原因是本机 TUN/fake-ip 代理把 `*.argotunnel.com` 解析到 `198.18.x.x` 并阻断 UDP 7844，QUIC 永远拨不通；而控制中心的「重启隧道」只是重跑同一条失败路径，所以重启无效。改为 http2（TCP）后可正常注册连接，公网 `/health` 返回 200。
+  - `TransportConfig` 新增 `protocol: "auto" | "quic" | "http2"`，默认 `http2`，可显式改回。
+  - 新增 `scripts/diagnose-tunnel.ps1`：一条命令给出「fake-ip 劫持 / 7844 被阻断 / 1033」的判定与处理建议。
+- **审计写入偶发失败**：两个进程抢锁时，锁文件在 `stat` 与读取之间被释放（`ENOENT`）或被 Windows 短暂占用（`EBUSY/EPERM/EACCES`），此前会直接判 `AUDIT_LOCK_READ_FAILED` 并让整次追加失败；现在归入既有重试窗口。10 轮稳定性从「1 轮失败」变为 10/10 全绿。
+
+### 新增
+
+- `prepare_edit`：模糊块替换（容忍缩进/行尾空白差异，必须唯一命中，缩进与结尾换行自动继承），仍走 `prepare_edit → commit_operation` 二阶段与审计。
+- `job_input`：向 `start_job({ interactive: true })` 启动的任务写入 stdin，支持交互式进程；非交互任务明确拒绝。
+- `read_file` 的 `start_line` 与 `job_output` 的 `offset` 支持负数，从末尾读取（类似 `tail`）。
+- `directory_tree` 新增 `use_gitignore`（默认 true）与 `ignore` 参数，按 gitignore 子集过滤噪声目录，并返回 `ignored` 计数。
+
+### 变更
+
+- 工具数量 74 → 76；`tools/list` 契约测试同步更新。
+
+### 验证
+
+- runtime 全量 **182/182**，连续 **10 轮**全绿（失败即停、无重试）
+- 应用测试 **417 passed** / 4 skipped；typecheck 通过；lint 0 error
+- 隧道实测：4 条连接注册，公网 `/health` 200，未授权 `/mcp` 401
+
+---
+
 ## v0.1.1 — 待发布（分支 `release/v0.1.1-hardening`）
 
 发布日期：待定（发布门禁见文末）。
