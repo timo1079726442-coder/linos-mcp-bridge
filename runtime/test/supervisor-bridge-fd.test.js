@@ -61,7 +61,9 @@ test("Electron Node mode uses stdio index 3 IPC for repeated full-duplex bridge 
   try {
     const [ready] = await Promise.race([
       once(child.stdout, "data"),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("bridge child startup timeout")), 3000)),
+      // 这是"等子进程把模块加载完"的启动预算，不是断言；3s 在负载高的机器/CI 上会误报，
+      // 断言本身仍是"帧必须完整往返"。
+      new Promise((_, reject) => setTimeout(() => reject(new Error("bridge child startup timeout")), 20_000)),
     ]);
     assert.match(String(ready), /BRIDGE_READY/);
     for (const ping of ["ping-1", "ping-2"]) {

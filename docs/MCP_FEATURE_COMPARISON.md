@@ -110,6 +110,9 @@
 |---|---|---|
 | `project_snapshot` | `use_gitignore`（默认 true）、`ignore[]` | 先按 gitignore 子集过滤再统计，避免 `node_modules`/`build` 污染目录树、大文件与扩展名统计 |
 | `search_files` | `modified_after`、`modified_before`（ISO-8601） | 按修改时间筛选，只找最近动过的文件；**只作用于文件**，目录不过滤（否则整棵子树消失，更难定位） |
+| `audit_project_structure` / `generate_project_inventory` | 同一套 `use_gitignore`、`ignore[]` | 结构判定与清单也排除被忽略目录：被忽略目录里的测试不再让 `Has tests` 变绿，清单也不再列出噪声目录 |
+
+**明确不接忽略规则**的三个工具：`detect_archive_candidates`、`list_artifacts`、`readLatestReport` —— 它们的工作就是查找构建产物与残留，套上 gitignore 会把目标本身过滤掉。`batchSearchPatterns` 同理保持现状：搜内容时被忽略的文件仍可命中。
 
 `search_files` 命中文件时返回 `modifiedAt`，被时间过滤掉的计数放在 `timeFiltered`（仅在启用过滤时出现）；非法时间戳返回 `invalid_modified_after` / `invalid_modified_before`。
 

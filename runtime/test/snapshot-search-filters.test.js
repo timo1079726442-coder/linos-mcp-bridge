@@ -133,3 +133,49 @@ test("search_files: 非法时间戳被拒绝", async () => {
     await rm(parent, { recursive: true, force: true });
   }
 });
+
+// ---------- 结构审计与清单也遵循同一套忽略规则 ----------
+
+async function setupAudit() {
+  const parent = await mkdtemp(path.join(tmpdir(), "c2c-audit-ignore-"));
+  const workspace = path.join(parent, "ws");
+  const profile = path.join(parent, "profile");
+  await mkdir(path.join(workspace, "generated"), { recursive: true });
+  await mkdir(profile, { recursive: true });
+  await writeFile(path.join(workspace, ".gitignore"), "generated/\n", "utf8");
+  await writeFile(path.join(workspace, "README.md"), "# demo\n", "utf8");
+  // 只有在被忽略的目录里才存在测试文件：忽略生效时 Has tests 必须为 false。
+  await writeFile(path.join(workspace, "generated", "a.test.js"), "test\n", "utf8");
+  await writeFile(path.join(profile, "tool-policy.json"), JSON.stringify({ version: 1, tools: {} }), "utf8");
+  return { parent, workspace, profile };
+}
+
+test("audit_project_structure: 被忽略目录里的测试不再影响判定", async () => {
+  const { parent, workspace, profile } = await setupAudit();
+  try {
+    const withIgnore = await call(profile, workspace, "audit_project_structure", { path: "." });
+    const testsCheck = withIgnore.checks.find((entry) => entry.id === "tests");
+    assert.equal(testsCheck.passed, false, "generated/ 被忽略后不应看到其中的测试");
+
+    const withoutIgnore = await call(profile, workspace, "audit_project_structure", { path: ".", use_gitignore: false });
+    const testsCheck2 = withoutIgnore.checks.find((entry) => entry.id === "tests");
+    assert.equal(testsCheck2.passed, true, "关闭忽略后应能看到测试目录内容");
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+test("generate_project_inventory: 清单跳过被忽略目录", async () => {
+  const { parent, workspace, profile } = await setupAudit();
+  try {
+    const inventory = await call(profile, workspace, "generate_project_inventory", { path: "." });
+    const paths = inventory.rows.map((row) => row.path);
+    assert.ok(paths.includes("README.md"));
+    assert.equal(paths.includes("generated"), false, "被忽略目录不应出现在清单里");
+
+    const full = await call(profile, workspace, "generate_project_inventory", { path: ".", ignore: ["!generated/"] });
+    assert.equal(full.rows.map((row) => row.path).includes("generated"), true, "! 反向包含应把它带回来");
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});

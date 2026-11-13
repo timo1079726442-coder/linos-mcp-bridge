@@ -876,13 +876,21 @@ async function dispatchMcpInner(
           },
           {
             name: "audit_project_structure",
-            description: "确定性审计项目结构、测试目录、文档、构建标记和疑似敏感文件名；不读取敏感文件正文。",
-            inputSchema: objectSchema({ path: { type: "string", description: "工作区内相对目录，默认根目录" } }),
+            description: "确定性审计项目结构、测试目录、文档、构建标记和疑似敏感文件名；不读取敏感文件正文；默认按 .gitignore 过滤。",
+            inputSchema: objectSchema({
+              path: { type: "string", description: "工作区内相对目录，默认根目录" },
+              ignore: { type: "array", maxItems: 50, items: { type: "string" }, description: "追加忽略规则（gitignore 子集）" },
+              use_gitignore: { type: "boolean", description: "是否读取工作区根的 .gitignore，默认 true" },
+            }),
           },
           {
             name: "generate_project_inventory",
-            description: "生成顶层项目清单，识别项目标记、归档候选并给出下一步审计建议。",
-            inputSchema: objectSchema({ path: { type: "string", description: "工作区内相对目录，默认根目录" } }),
+            description: "生成顶层项目清单，识别项目标记、归档候选并给出下一步审计建议；默认按 .gitignore 过滤。",
+            inputSchema: objectSchema({
+              path: { type: "string", description: "工作区内相对目录，默认根目录" },
+              ignore: { type: "array", maxItems: 50, items: { type: "string" }, description: "追加忽略规则（gitignore 子集）" },
+              use_gitignore: { type: "boolean", description: "是否读取工作区根的 .gitignore，默认 true" },
+            }),
           },
           {
             name: "detect_archive_candidates",

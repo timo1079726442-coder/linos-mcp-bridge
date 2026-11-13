@@ -326,7 +326,9 @@ export async function auditProjectStructure(
   const stat = await fs.stat(root.absolute);
   if (!stat.isDirectory()) throw new McpSecurityError("not_a_directory");
 
-  const entries = await walk(root.absolute, root.relative, 4, MAX_PROJECT_FILES, ctx.boundary);
+  // 结构审计同样遵循忽略规则：自定义忽略目录（如 generated/）不该干扰 Has tests 之类的判定。
+  const ignoreRules = await projectIgnoreRules(args, ctx);
+  const entries = await walk(root.absolute, root.relative, 4, MAX_PROJECT_FILES, ctx.boundary, ignoreRules);
   const topLevel = await safeReadDir(root.absolute);
   const topNames = new Set(topLevel.map((entry) => entry.name.toLowerCase()));
   const allPathsLower = entries.map((entry) => entry.relative.toLowerCase());
@@ -374,12 +376,15 @@ export async function generateProjectInventory(
   const stat = await fs.stat(root.absolute);
   if (!stat.isDirectory()) throw new McpSecurityError("not_a_directory");
 
+  const ignoreRules = await projectIgnoreRules(args, ctx);
   const children = await fs.readdir(root.absolute, { withFileTypes: true });
   const rows: Array<Record<string, unknown>> = [];
   for (const entry of children.sort((a, b) => a.name.localeCompare(b.name))) {
     if (isSkippableDirectory(entry.name) || ctx.boundary.sensitivePaths.isSensitive(entry.name)) continue;
     const absolute = path.join(root.absolute, entry.name);
     const relative = normalizeSlash(path.join(root.relative === "." ? "" : root.relative, entry.name));
+    // 清单同样跳过被忽略的条目：清单是用来"看有什么"，噪声目录会把结论冲淡。
+    if (ignoreRules.length > 0 && isIgnored(relative, entry.isDirectory(), ignoreRules)) continue;
     if (entry.isFile()) {
       const stat = await fs.stat(absolute);
       rows.push({ path: relative, type: "file", sizeBytes: stat.size, marker: importantName(entry.name) });
