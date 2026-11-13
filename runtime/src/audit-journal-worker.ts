@@ -4,7 +4,10 @@ import * as path from "node:path";
 import { parentPort } from "node:worker_threads";
 
 const GENESIS = "0".repeat(64);
-const LOCK_TIMEOUT_MS = 5_000;
+// 抢锁等待上限。每次追加都要拿到排他锁再 fsync，Windows 上一次 sync 约 100-300ms；
+// 多进程各并发 6 次追加（最坏 24 次串行）时，5s 会让最后一个等待者超时，
+// 表现为 AUDIT_TIMEOUT。放宽到 20s 只是给排队留余量，仍是 fail-closed：锁一直拿不到照样失败。
+const LOCK_TIMEOUT_MS = 20_000;
 const LOCK_STALE_MS = 10_000;
 const MAX_JOURNAL_BYTES = 64 * 1024 * 1024;
 const WORKSPACE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -147,7 +150,20 @@ async function acquireLock(lockPath: string, workerId: string): Promise<() => Pr
       if (handle) await handle.close().catch(() => undefined);
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "EEXIST") throw error;
-      const metadata = await readLockMetadata(lockPath);
+      let metadata: LockMetadata | null;
+      try {
+        metadata = await readLockMetadata(lockPath);
+      } catch (readError) {
+        // 内容不可解析不等于锁已损坏：对手可能刚建好文件、元数据还没落盘，
+        // 跨进程可见性也可能滞后。在既有超时窗口内重试；窗口耗尽才算真失败
+        // （仍然是 fail-closed：绝不越过无法校验的锁去写）。
+        if (readError instanceof AuditWorkerError && readError.code === "AUDIT_LOCK_CORRUPT") {
+          if (Date.now() >= deadline) throw readError;
+          await delay(25);
+          continue;
+        }
+        throw readError;
+      }
       if (!metadata) {
         if (Date.now() >= deadline) throw new AuditWorkerError("AUDIT_LOCK_TIMEOUT");
         await delay(10);
