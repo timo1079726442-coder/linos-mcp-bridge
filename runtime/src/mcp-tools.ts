@@ -26,6 +26,7 @@ import {
   shadcnLocalComponents,
   shadcnProjectInfo,
 } from "./advanced-tools.js";
+import { isIgnored, parseIgnoreRules } from "./ignore-rules.js";
 import {
   cancelPendingOperation,
   commitOperation,
@@ -36,6 +37,7 @@ import {
   prepareBatchWrite,
   prepareReplacements,
   prepareScaffold,
+  prepareEdit,
   prepareWrite,
   WriteOperationError,
   type WriteContext,
@@ -172,6 +174,7 @@ export const TOOL_INVENTORY: ReadonlyArray<{
   { name: "run_powershell", conditional: true, group: "命令", approval: "manual", enabled: false, description: "运行 PowerShell：mode=user 为当前用户（无沙箱），mode=constrained 为受限语言模式（非 OS 沙箱）。" },
   { name: "git_commit", conditional: true, group: "命令", approval: "manual", enabled: false, description: "提交已暂存的 Git 改动（不 add、不 push）。" },
   { name: "start_job", conditional: true, group: "任务", approval: "manual", enabled: false, description: "异步启动一个后台任务并立即返回 job_id；支持 execute_command / run_powershell / git_commit，用于长任务轮询。" },
+  { name: "job_input", conditional: true, group: "任务", approval: "manual", description: "向以 interactive 模式启动的后台任务写入一行输入（stdin），用于交互式进程。" },
   { name: "job_status", conditional: true, group: "任务", approval: "auto", description: "查询后台任务状态、进度与退出码；轮询不阻塞。" },
   { name: "job_output", conditional: true, group: "任务", approval: "auto", description: "分页读取后台任务的脱敏输出片段。" },
   { name: "job_list", conditional: true, group: "任务", approval: "auto", description: "列出当前工作区的后台任务与最新状态；不返回输出正文。" },
@@ -181,6 +184,7 @@ export const TOOL_INVENTORY: ReadonlyArray<{
   { name: "batch_prepare_write", conditional: true, group: "写入", approval: "auto", description: "一次暂存多个文件写入（最多 25 个）：只做校验与预演，不落盘。" },
   { name: "batch_replace_text", conditional: true, group: "写入", approval: "auto", description: "暂存批量精确文本替换：每个查找串必须恰好命中一次；预演不落盘。" },
   { name: "prepare_project_scaffold", conditional: true, group: "写入", approval: "auto", description: "暂存 PROJECT.md / LLM.md / STATUS.md / .brainn/project.json 的项目骨架，不创建目录、不落盘。" },
+  { name: "prepare_edit", conditional: true, group: "写入", approval: "auto", description: "暂存一次模糊块替换：find 按折叠空白后的行匹配，必须唯一命中；只预演不落盘。" },
   { name: "list_pending_operations", conditional: false, group: "写入", approval: "auto", description: "列出当前客户端尚未提交的写入草稿（只有元数据，没有正文）。" },
   { name: "cancel_pending_operation", conditional: false, group: "写入", approval: "auto", description: "丢弃当前客户端的一笔写入草稿，不改动任何文件。" },
   { name: "commit_operation", conditional: true, group: "写入", approval: "manual", description: "提交一笔已暂存的写入；重新校验目标版本、本机确认后落盘并读回复核。" },
@@ -341,6 +345,7 @@ function isHighRiskAuditTool(tool: string): boolean {
   return WRITE_SCOPE_TOOL_NAMES.has(tool)
     || SHELL_SCOPE_TOOL_NAMES.has(tool)
     || tool === "job_cancel"
+    || tool === "job_input"
     || tool === "workflow_prepare"
     || tool === "workflow_commit"
     || tool === "workflow_continue"
@@ -582,6 +587,9 @@ async function dispatchMcpInner(
         case "prepare_project_scaffold":
           data = await prepareScaffold(writeCtx, rest);
           break;
+        case "prepare_edit":
+          data = await prepareEdit(writeCtx, rest);
+          break;
         case "list_pending_operations":
           data = listPendingOperations(writeCtx);
           break;
@@ -749,11 +757,18 @@ async function dispatchMcpInner(
           },
           {
             name: "directory_tree",
-            description: "列出授权工作区目录树，限定深度与节点数量，跳过敏感目录与符号链接。",
+            description: "列出授权工作区目录树，限定深度与节点数量，跳过敏感目录与符号链接；默认按 .gitignore 过滤，可追加 ignore 规则。",
             inputSchema: objectSchema({
               path: { type: "string", description: "相对起始目录，默认根目录" },
               max_depth: { type: "integer", minimum: 1, maximum: 5 },
               max_entries: { type: "integer", minimum: 1, maximum: 500 },
+              ignore: {
+                type: "array",
+                maxItems: 50,
+                items: { type: "string" },
+                description: "追加忽略规则（gitignore 子集，支持 ! 反向包含），例如 node_modules、*.log、build/",
+              },
+              use_gitignore: { type: "boolean", description: "是否读取工作区根的 .gitignore，默认 true" },
             }),
           },
           {
@@ -1104,6 +1119,7 @@ async function dispatchMcpInner(
                 timeout_ms: { type: "integer", minimum: 1000, maximum: 14400000, description: "后台执行超时默认 30 分钟上限 4 小时" },
                 idempotency_key: { type: "string", description: "幂等键避免重复提交" },
                 label: { type: "string", description: "任务显示名最多 120 字符" },
+                interactive: { type: "boolean", description: "保持 stdin 打开，允许用 job_input 写入（交互式进程）" },
               },
               ["action"],
             ),
@@ -1114,12 +1130,24 @@ async function dispatchMcpInner(
             inputSchema: objectSchema({ job_id: { type: "string", description: "start_job 返回的任务编号" } }, ["job_id"]),
           },
           {
-            name: "job_output",
-            description: "分页读取后台任务的脱敏输出片段。",
+            name: "job_input",
+            description: "向以 interactive 模式启动的后台任务写入输入（stdin），用于交互式进程（REPL、等待输入的脚本）。",
             inputSchema: objectSchema(
               {
                 job_id: { type: "string", description: "start_job 返回的任务编号" },
-                offset: { type: "integer", minimum: 0, description: "字节偏移默认 0" },
+                input: { type: "string", description: "要写入的一行文本" },
+                newline: { type: "boolean", description: "是否追加换行，默认 true" },
+              },
+              ["job_id", "input"],
+            ),
+          },
+          {
+            name: "job_output",
+            description: "分页读取后台任务的脱敏输出片段；offset 为负表示从末尾读取（tail）。",
+            inputSchema: objectSchema(
+              {
+                job_id: { type: "string", description: "start_job 返回的任务编号" },
+                offset: { type: "integer", description: "字节偏移；默认 0，负数表示从末尾往前（如 -4096 取最后 4KB）" },
                 max_bytes: { type: "integer", minimum: 1, maximum: 32768, description: "最多返回字节默认 8192" },
               },
               ["job_id"],
@@ -1165,6 +1193,18 @@ async function dispatchMcpInner(
                 },
               },
               ["files"],
+            ),
+          },
+          {
+            name: "prepare_edit",
+            description: "暂存一次模糊块替换：find 按折叠空白后的行匹配（容忍缩进/行尾空白差异），必须唯一命中；只预演不落盘，需 commit_operation 提交。",
+            inputSchema: objectSchema(
+              {
+                path: { type: "string", description: "工作区内相对路径（必须已存在）" },
+                find: { type: "string", description: "要替换的原始块（多行）；空白差异会被容忍" },
+                replace: { type: "string", description: "替换后的块；空字符串表示删除该块" },
+              },
+              ["path", "find", "replace"],
             ),
           },
           {
@@ -1456,6 +1496,7 @@ const WRITE_SCOPE_TOOL_NAMES = new Set([
   "batch_prepare_write",
   "batch_replace_text",
   "prepare_project_scaffold",
+  "prepare_edit",
   "cancel_pending_operation",
   "commit_operation",
   "commit_operations",
@@ -1490,6 +1531,7 @@ const JOB_TOOL_NAMES = new Set([
   "job_list",
   "job_cancel",
   "job_resume",
+  "job_input",
 ]);
 
 /** 只读 MySQL 数据源工具（委托主进程）。 */
@@ -1937,14 +1979,20 @@ async function callTool(name: string, args: Record<string, unknown>, ws: Workspa
       const bytes = await fs.readFile(resolved.absolute);
       if (isLikelyBinary(resolved.relative, bytes)) throw new McpSecurityError("binary_file_denied");
       const lines = bytes.toString("utf8").split(/\r?\n/);
-      const startLine = ws.boundary.limit(args.start_line, 0, lines.length);
+      const rawStart = typeof args.start_line === "number" && Number.isInteger(args.start_line) ? args.start_line : 0;
       const limit = ws.boundary.limit(args.limit, 400, 400);
+      // 负 start_line 表示"从末尾往前读"（类似 tail）：-200 即最后 200 行。
+      const negativeTail = rawStart < 0;
+      const startLine = negativeTail
+        ? Math.max(0, lines.length - Math.min(Math.abs(rawStart), lines.length))
+        : ws.boundary.limit(args.start_line, 0, lines.length);
       return {
         path: resolved.relative,
         totalLines: lines.length,
         startLine,
         lines: lines.slice(startLine, startLine + limit),
         truncated: startLine + limit < lines.length,
+        ...(negativeTail ? { tail: true } : {}),
       };
     }
     case "search_workspace":
@@ -2417,7 +2465,20 @@ async function directoryTree(args: Record<string, unknown>, ws: WorkspaceContext
   if (!(await fs.stat(start.absolute)).isDirectory()) throw new McpSecurityError("not_a_directory");
   const maxDepth = ws.boundary.limit(args.max_depth, 3, 5);
   const maxEntries = ws.boundary.limit(args.max_entries, 200, 500);
+  // 忽略规则：默认读取工作区根的 .gitignore，调用方可以用 ignore 追加（也支持 ! 反向包含）。
+  const ruleLines: string[] = [];
+  if (args.use_gitignore !== false) {
+    const gitignore = await fs.readFile(path.join(ws.boundary.rootReal, ".gitignore"), "utf8").catch(() => "");
+    if (gitignore) ruleLines.push(...gitignore.split(/\r?\n/));
+  }
+  if (Array.isArray(args.ignore)) {
+    for (const entry of args.ignore) {
+      if (typeof entry === "string" && entry.trim()) ruleLines.push(entry);
+    }
+  }
+  const ignoreRules = parseIgnoreRules(ruleLines);
   const entries: Array<{ path: string; type: "directory" | "file"; depth: number }> = [];
+  let ignoredCount = 0;
   async function walk(dir: string, depth: number): Promise<void> {
     if (depth > maxDepth || entries.length >= maxEntries) return;
     const found = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
@@ -2428,12 +2489,23 @@ async function directoryTree(args: Record<string, unknown>, ws: WorkspaceContext
       const relative = path.relative(ws.boundary.rootReal, absolute).replaceAll("\\", "/");
       if (ws.boundary.sensitivePaths.isSensitive(relative)) continue;
       if (!item.isDirectory() && !item.isFile()) continue;
-      entries.push({ path: relative, type: item.isDirectory() ? "directory" : "file", depth });
-      if (item.isDirectory() && depth < maxDepth) await walk(absolute, depth + 1);
+      const isDirectory = item.isDirectory();
+      if (ignoreRules.length > 0 && isIgnored(relative, isDirectory, ignoreRules)) {
+        ignoredCount += 1;
+        continue;
+      }
+      entries.push({ path: relative, type: isDirectory ? "directory" : "file", depth });
+      if (isDirectory && depth < maxDepth) await walk(absolute, depth + 1);
     }
   }
   await walk(start.absolute, 1);
-  return { root: start.relative, entries, count: entries.length, truncated: entries.length >= maxEntries };
+  return {
+    root: start.relative,
+    entries,
+    count: entries.length,
+    truncated: entries.length >= maxEntries,
+    ...(ignoredCount > 0 ? { ignored: ignoredCount } : {}),
+  };
 }
 
 async function readBoundedOrdinaryFile(input: unknown, ws: WorkspaceContext): Promise<{ relative: string; bytes: Buffer }> {

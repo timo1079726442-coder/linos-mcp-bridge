@@ -12,6 +12,31 @@ import { TransportProcessOwnership, type TransportIdentity } from "./TransportPr
 import { isProcessAlive } from "../process/ProcessScanner.js";
 
 /** Explicit, V2-isolated Cloudflare Named Tunnel transport. */
+/**
+ * 生成 cloudflared 配置文本（纯函数，便于测试）。
+ *
+ * 协议默认为 http2：QUIC 走 UDP 7844，在不少家用网络/代理下被阻断，
+ * 而"重启隧道"只会重跑同一条失败路径，表现为公网长期 530 / error 1033。
+ * 传 protocol: "quic" 尊重显式选择；"auto" 时省略该键，交给 cloudflared 自行判定。
+ */
+export function buildCloudflaredConfig(
+  cfg: { tunnelId: string; credentialPath: string; hostname: string; protocol?: "auto" | "quic" | "http2" },
+  localPort: number,
+): string {
+  const quote = (value: string): string => JSON.stringify(value);
+  const protocol = cfg.protocol ?? "http2";
+  return [
+    `tunnel: ${cfg.tunnelId}`,
+    `credentials-file: ${quote(cfg.credentialPath)}`,
+    ...(protocol === "auto" ? [] : [`protocol: ${protocol}`]),
+    "ingress:",
+    `  - hostname: ${quote(cfg.hostname)}`,
+    `    service: http://127.0.0.1:${localPort}`,
+    "  - service: http_status:404",
+    "",
+  ].join("\n");
+}
+
 export class CloudflareNamedProvider implements TransportProvider {
   readonly id = "cloudflare-named";
   readonly displayName = "Cloudflare Named Tunnel";
@@ -249,16 +274,12 @@ export class CloudflareNamedProvider implements TransportProvider {
 
   private async writeConfig(localPort: number): Promise<void> {
     if (!this.cfg.configPath || !this.cfg.credentialPath || !this.cfg.tunnelId) throw new Error("V2_REMOTE_TRANSPORT_CONFIG_INCOMPLETE");
-    const quote = (value: string): string => JSON.stringify(value);
-    const config = [
-      `tunnel: ${this.cfg.tunnelId}`,
-      `credentials-file: ${quote(this.cfg.credentialPath)}`,
-      "ingress:",
-      `  - hostname: ${quote(this.cfg.hostname)}`,
-      `    service: http://127.0.0.1:${localPort}`,
-      "  - service: http_status:404",
-      "",
-    ].join("\n");
+    const config = buildCloudflaredConfig({
+      tunnelId: this.cfg.tunnelId,
+      credentialPath: this.cfg.credentialPath,
+      hostname: this.cfg.hostname,
+      protocol: this.cfg.protocol,
+    }, localPort);
     await fs.mkdir(path.dirname(this.cfg.configPath), { recursive: true });
     const temp = `${this.cfg.configPath}.tmp`;
     await fs.writeFile(temp, config, "utf8");

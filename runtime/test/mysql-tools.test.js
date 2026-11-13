@@ -70,7 +70,7 @@ test("已认证客户端的 tools/list 包含 3 个 MySQL 工具，且默认值�
     for (const name of ["mysql_list_schemas", "mysql_describe_table", "mysql_query"]) {
       assert.ok(names.includes(name), name);
     }
-    assert.equal(listed.tools.length, 74);
+    assert.equal(listed.tools.length, 76);
   } finally {
     await rm(ctx.parent, { recursive: true, force: true });
   }

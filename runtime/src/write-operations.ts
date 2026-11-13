@@ -17,9 +17,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { McpSecurityError, type McpSecurityBoundary } from "./security-boundary.js";
+import { applyFuzzyEdit, findFuzzyMatches, previewEdit } from "./fuzzy-edit.js";
 
 export type WriteMode = "create" | "overwrite";
-export type OperationKind = "write" | "replacement" | "scaffold" | "shadcn";
+export type OperationKind = "write" | "replacement" | "scaffold" | "shadcn" | "edit";
 export type OperationStatus = "PENDING_LOCAL_APPROVAL" | "COMMITTING" | "FAILED";
 
 const DRAFT_TTL_MS = 10 * 60 * 1000;
@@ -103,6 +104,8 @@ export interface OperationView {
   requires_local_approval: true;
   commit_tool: "commit_operation";
   durability: "MEMORY_ONLY";
+  /** prepare_edit 的替换预览（仅展示，不参与提交）。 */
+  preview?: string[];
 }
 
 export interface CommitFileResult {
@@ -479,6 +482,43 @@ export async function prepareReplacements(ctx: WriteContext, args: Record<string
     files.push({ path: relative, mode: "overwrite", content: text.replace(record.find, record.replace) });
   }
   return prepareFiles(ctx, files, "replacement");
+}
+
+/**
+ * 模糊块替换预演：`find` 按"折叠空白后的行"匹配，唯一命中后生成新内容并走既有暂存流程。
+ * 命中 0 次 → EDIT_NOT_FOUND；≥2 次 → EDIT_NOT_UNIQUE（要求调用方给出更具体的上下文）。
+ */
+export async function prepareEdit(ctx: WriteContext, args: Record<string, unknown>): Promise<OperationView> {
+  const relative = normalizeRelativePath(args.path, ctx.boundary.rootReal);
+  if (typeof args.find !== "string" || args.find.length < 1 || args.find.length > 20_000) {
+    throw new WriteOperationError("EDIT_FIND_INVALID");
+  }
+  if (typeof args.replace !== "string" || args.replace.length > MAX_FILE_BYTES || args.replace.includes("\0")) {
+    throw new WriteOperationError("EDIT_REPLACE_INVALID");
+  }
+  const target = await inspectTarget(ctx, relative);
+  if (!target.exists || !target.content) throw new WriteOperationError("TARGET_NOT_FOUND");
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(target.content);
+  } catch {
+    throw new WriteOperationError("INVALID_UTF8_TARGET");
+  }
+  let content: string;
+  let preview: string[] = [];
+  try {
+    const matches = findFuzzyMatches(text, args.find, 2);
+    if (matches.length === 0) throw new WriteOperationError("EDIT_NOT_FOUND");
+    if (matches.length > 1) throw new WriteOperationError("EDIT_NOT_UNIQUE");
+    const edited = applyFuzzyEdit(text, args.find, args.replace);
+    content = edited.content;
+    preview = previewEdit(matches[0]!, args.replace);
+  } catch (error) {
+    if (error instanceof WriteOperationError) throw error;
+    throw new WriteOperationError(error instanceof Error ? error.message : "EDIT_FAILED");
+  }
+  const operation = await prepareFiles(ctx, [{ path: relative, mode: "overwrite", content }], "edit");
+  return { ...operation, preview };
 }
 
 /**

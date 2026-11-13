@@ -128,6 +128,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\tunnel-named.ps1 -Domain mcp.
 | 工具报 `FETCH_SCHEME_DOWNGRADE` | 站点把 https 重定向到 http | 改用 https 地址；该降级被有意禁止 |
 | 工具报 `FETCH_PEER_MISMATCH` | 实际连接的对端与校验通过的 IP 不一致 | 视作可疑：检查该域名解析是否被劫持/重绑定，不要放宽限制 |
 | 工具报 `FETCH_CONTENT_ENCODING_REJECTED` | 站点返回了 gzip 等压缩响应 | 该工具只接受未压缩文本；改用提供原始内容的接口 |
+| **公网 530 / error 1033**，点「重启隧道」无效 | cloudflared 连不上 Cloudflare 边缘（TCP/UDP 7844 被阻断，或本机 TUN/Clash 类代理劫持了 DNS，让 cloudflared 去拨 `198.18.x.x`） | 跑 `powershell -ExecutionPolicy Bypass -File scripts\diagnose-tunnel.ps1 -ProfileDir <profile目录> -PublicUrl https://<你的域名>`；按输出处理：给 `*.argotunnel.com` 加 fake-ip-filter / 直连规则，或放行 7844。**重启隧道只是重跑同一条被阻断的路径，不会自愈** |
 
 ---
 

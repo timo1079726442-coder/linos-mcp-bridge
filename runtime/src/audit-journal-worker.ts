@@ -85,7 +85,10 @@ async function readLockMetadata(lockPath: string): Promise<LockMetadata | null> 
   try {
     [raw, stat] = await Promise.all([fs.readFile(lockPath, "utf8"), fs.stat(lockPath)]);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    const code = (error as NodeJS.ErrnoException).code;
+    // 锁在 stat/read 之间被释放是正常竞争；Windows 上文件句柄短暂占用同理。
+    // 这些都属于"这一轮没抢到锁"，交给 acquireLock 的重试循环，而不是整体失败。
+    if (code === "ENOENT" || code === "EBUSY" || code === "EPERM" || code === "EACCES") return null;
     throw new AuditWorkerError("AUDIT_LOCK_READ_FAILED");
   }
   try {

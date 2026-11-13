@@ -2,7 +2,7 @@ import * as path from "node:path";
 import { JobStore, type JobKind, type JobRecord, type JobStartInput } from "./job-store.js";
 import { assertAllowedCommand, resolvePowerShellArgv, tokenizeCommand } from "./command-tools.js";
 import { McpSecurityBoundary } from "./security-boundary.js";
-import { launchJob, cancelActiveJob, isJobActive, countActiveJobs, waitForActiveJobSettled, recoverInterruptedJobs } from "./job-runner.js";
+import { launchJob, cancelActiveJob, isJobActive, countActiveJobs, waitForActiveJobSettled, recoverInterruptedJobs, writeJobInput } from "./job-runner.js";
 import { redactString } from "./redaction.js";
 import type { McpCallerContext } from "./mcp-tools.js";
 
@@ -211,6 +211,7 @@ export async function startJobTool(
     ...(mode ? { mode } : {}),
     ...(message ? { message } : {}),
     ...(allowEmpty !== undefined ? { allowEmpty } : {}),
+    ...(args.interactive === true ? { interactive: true } : {}),
   };
   return withWorkspaceStartLock(`${path.resolve(profileDir)}::${ws.workspaceId}`, async () => {
     if (idempotencyKey) {
@@ -322,16 +323,26 @@ export async function jobOutputTool(ws: JobWorkspace, args: Record<string, unkno
   requireSameWorkspace(record, ws.workspaceId);
   requireSameClient(record, clientId);
   const marked = await markOrphaned(store, record);
-  const offset = typeof args.offset === "number" ? args.offset : 0;
+  const rawOffset = typeof args.offset === "number" && Number.isInteger(args.offset) ? args.offset : 0;
   const maxBytes = typeof args.max_bytes === "number" ? args.max_bytes : 8192;
+  // 负 offset 表示"从末尾往前读"（类似 tail）：-4096 即最后 4KB。
+  let offset = rawOffset;
+  let tail = false;
+  if (rawOffset < 0) {
+    const size = await store.outputSize(id).catch(() => null);
+    tail = true;
+    offset = size === null ? 0 : Math.max(0, size - Math.min(Math.abs(rawOffset), size));
+  }
   const out = await store.readOutput(id, offset, maxBytes);
   return {
     job_id: marked.id,
     state: marked.state,
     output: out.output,
     next_offset: out.nextOffset,
+    offset,
     eof: out.eof,
     truncated: out.truncated || (await store.get(id)).truncatedOutput,
+    ...(tail ? { tail: true } : {}),
   };
 }
 
@@ -467,9 +478,38 @@ export async function handleJobTool(
       return jobCancelTool(ws, args);
     case "job_resume":
       return jobResumeTool(ws, args);
+    case "job_input":
+      return jobInputTool(ws, args);
     default:
       throw new Error(`unknown_tool: ${name}`);
   }
+}
+
+export async function jobInputTool(ws: JobWorkspace, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const clientId = requireCaller(ws);
+  requireShellScope(ws);
+  const store = new JobStore(ws.profileDir || null, ws.workspaceId, timelineOf(ws));
+  const id = typeof args.job_id === "string" ? args.job_id : "";
+  const record = await store.get(id);
+  requireSameWorkspace(record, ws.workspaceId);
+  requireSameClient(record, clientId);
+  if (record.spec.interactive !== true) {
+    throw new Error("JOB_NOT_INTERACTIVE：该任务未以 interactive 模式启动，无法写入输入。");
+  }
+  if (record.state !== "RUNNING") {
+    throw new Error(`JOB_NOT_RUNNING：任务当前状态 ${record.state}，无法写入输入。`);
+  }
+  const raw = typeof args.input === "string" ? args.input : "";
+  if (!raw) throw new Error("JOB_INPUT_EMPTY：input 不能为空。");
+  // 默认补换行：交互式进程几乎都按行读取。
+  const withNewline = args.newline === false ? raw : (raw.endsWith("\n") ? raw : `${raw}\n`);
+  const written = await writeJobInput(id, withNewline);
+  return {
+    job_id: id,
+    state: record.state,
+    bytes: written.bytes,
+    newline: withNewline.endsWith("\n"),
+  };
 }
 
 export function jobToolsForManifest(): Array<{ name: string; area: string; risk: "READ_ONLY" | "DRY_RUN_ONLY" }> {
@@ -480,6 +520,7 @@ export function jobToolsForManifest(): Array<{ name: string; area: string; risk:
     { name: "job_list", area: "execution_evidence", risk: "READ_ONLY" },
     { name: "job_cancel", area: "execution", risk: "DRY_RUN_ONLY" },
     { name: "job_resume", area: "execution", risk: "DRY_RUN_ONLY" },
+    { name: "job_input", area: "execution", risk: "DRY_RUN_ONLY" },
   ];
 }
 
