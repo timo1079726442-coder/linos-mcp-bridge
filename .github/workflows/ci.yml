@@ -62,12 +62,28 @@ jobs:
           node-version: 20
           cache: npm
 
-      # 官方密钥扫描：全分支 + 全 tag + 全提交
-      - name: Secret scan (gitleaks)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_CONFIG: ${{ github.workspace }}\.gitleaks.toml
+      # 官方密钥扫描：全分支 + 全 tag + 全提交。
+      # 不用 gitleaks-action@v2：它内置的下载地址指向旧仓库 zricethezav/gitleaks，
+      # 上游迁移到 gitleaks/gitleaks 后该地址 404，"安装 gitleaks"这一步必然失败。
+      # 这里直接从官方 release 取 CLI，并用官方 checksums 校验后再执行。
+      - name: Secret scan (gitleaks, full history)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "8.30.1"
+          $base = "https://github.com/gitleaks/gitleaks/releases/download/v$version"
+          $zip = Join-Path $env:RUNNER_TEMP "gitleaks.zip"
+          Invoke-WebRequest -Uri "$base/gitleaks_${version}_windows_x64.zip" -OutFile $zip
+          $checksums = Join-Path $env:RUNNER_TEMP "gitleaks_checksums.txt"
+          Invoke-WebRequest -Uri "$base/gitleaks_${version}_checksums.txt" -OutFile $checksums
+          $expected = (Select-String -Path $checksums -Pattern "gitleaks_${version}_windows_x64.zip").Line.Split(" ")[0]
+          $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($expected.ToLowerInvariant() -ne $actual) { throw "gitleaks checksum mismatch: $actual != $expected" }
+          $dest = Join-Path $env:RUNNER_TEMP "gitleaks-bin"
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+          $exe = Join-Path $dest "gitleaks.exe"
+          & $exe detect --source . --config .gitleaks.toml --redact --no-banner --exit-code 1
+          if ($LASTEXITCODE -ne 0) { throw "gitleaks reported findings (exit $LASTEXITCODE)" }
 
       # 本地等价扫描作为独立第二道（规则集不同，互补）
       - name: Secret scan (local rules)

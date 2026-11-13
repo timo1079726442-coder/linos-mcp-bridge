@@ -33,6 +33,10 @@ regexes = [
   '''c2c_at_inner_token_xyz''',
   '''a-strong-password''',
   '''must not be accepted''',
+  # Redactor 测试断言"脱敏后不再包含该明文"用的合成密钥。
+  # 证据：src/main/redaction/Redactor.test.ts 第 6-7 行；其中 aGVsbG90aGVyZQ==
+  # base64 解码为 "hellothere"，即人工构造的夹具，不是任何真实凭据。
+  '''c2c_ri_secret_aGVsbG90aGVyZQabc123''',
 ]
 
 # 文档中的说明性片段
