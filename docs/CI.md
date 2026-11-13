@@ -77,6 +77,37 @@
 
 `package` 作业实测步骤：`npm ci` → `runtime ci` → `build:portable` → **静态门禁 PASS** → SBOM + 校验和 → artifact 上传。
 
+### 4.2 第二轮：`package` 其实从未被自动触发（2026-11-13）
+
+`package` 的条件是 `startsWith(github.ref, 'refs/tags/v')`，但 `on.push` **只声明了 `branches`**。GitHub 的行为是：一旦声明了 `branches` 过滤，tag 推送就不会匹配任何过滤器——所以 v0.1.3 / v0.1.4 / v0.1.5 三个 tag 都没有触发过打包作业，这条路径长期"存在但没跑过"。
+
+**修复**：
+
+```yaml
+on:
+  push:
+    branches: [main, "release/**"]
+    tags: ["v*"]
+```
+
+**实测**（不能改写已发布 tag，故用 tag ref 手动触发等同验证）：
+
+| 运行 | ref | 结论 |
+|---|---|---|
+| `workflow_dispatch` | `v0.1.5` | `verify (20)` ✅ / `verify (24)` ✅ / `security` ✅ / **`package` ✅**，artifact `portable-package` 约 136 MB |
+| push | `main` | `verify (20)` ✅ / `verify (24)` ✅ / `security` ✅ / `package` skipped（符合设计） |
+
+**流程纠正**：v0.1.1–v0.1.5 的发布包都是本地 `npm run build:portable` 产出。从下一个版本起按本文 §4 的约定走——**取 CI 的 `portable-package` artifact 上传 Release，不在本地另打一次包**。
+
+### 4.3 第三轮：并发审计用例在 Node 20 上抖动（已修）
+
+`verify (20)` 曾在 tag 构建时失败，错误为 `AUDIT_LOCK_CORRUPT` 与 `AUDIT_TIMEOUT`，两者都属于**锁竞争表现**而非数据问题：
+
+- `O_EXCL` 建锁到元数据落盘之间存在可见窗口，读到不可解析内容不应立即判损坏；
+- 4 进程 × 6 次 `fsync` 追加排队，Windows 单次 `sync` 约 100–300ms，原 5s 等待上限会让最后一个等待者超时。
+
+修复后压测：并发用例 **25/25 通过**（修前 20 次里失败 1 次），runtime 全量 **188/188 连续 10 轮**。
+
 ---
 
 ## 5. 本地等价命令（提交前自检）
